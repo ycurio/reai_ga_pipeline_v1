@@ -1,0 +1,74 @@
+[
+  {
+    "lead": {
+      "owner_name": "ABC HOMES LLC",
+      "parcel_id": "00-0000-0000-000",
+      "property_address": "123 Main St",
+      "county": "Fulton",
+      "state": "GA"
+    },
+    "score": 0,
+    "records": [
+      {
+        "source": "PACER_BANKRUPTCY",
+        "record_type": "unknown",
+        "county": null,
+        "state": "GA",
+        "owner_name": "ABC HOMES LLC",
+        "parcel_id": "00-0000-0000-000",
+        "property_address": "123 Main St",
+        "mailing_address": null,
+        "filing_date": null,
+        "amount": null,
+        "status": null,
+        "case_number": null,
+        "instrument_number": null,
+        "book": null,
+        "page": null,
+        "raw_reference": null,
+        "raw_url": null,
+        "confidence": 0.5,
+        "extracted_at": "2026-06-16T19:03:07.346450",
+        "raw": {
+          "error": "406 Client Error: 406 for url: https://pcl.uscourts.gov/pcl-public-api/rest/parties/find"
+        }
+      }
+    ]
+  },
+  {
+    "lead": {
+      "owner_name": "FOURSQUARED LLC",
+      "parcel_id": " 22542009712626",
+      "property_address": " 3160 SONATA LN",
+      "county": " FULTON",
+      "state": "GA"
+    },
+    "score": 0,
+    "records": [
+      {
+        "source": "PACER_BANKRUPTCY",
+        "record_type": "unknown",
+        "county": null,
+        "state": "GA",
+        "owner_name": "FOURSQUARED LLC",
+        "parcel_id": " 22542009712626",
+        "property_address": " 3160 SONATA LN",
+        "mailing_address": null,
+        "filing_date": null,
+        "amount": null,
+        "status": null,
+        "case_number": null,
+        "instrument_number": null,
+        "book": null,
+        "page": null,
+        "raw_reference": null,
+        "raw_url": null,
+        "confidence": 0.5,
+        "extracted_at": "2026-06-16T19:03:07.407778",
+        "raw": {
+          "error": "406 Client Error: 406 for url: https://pcl.uscourts.gov/pcl-public-api/rest/parties/find"
+        }
+      }
+    ]
+  }
+]

@@ -1,0 +1,17 @@
+state: GA
+output_dir: data/output
+sources:
+  fema_nfhl:
+    enabled: true
+  pacer_bankruptcy:
+    enabled: false
+  gsccca_csv:
+    enabled: true
+    input_dir: data/gsccca_exports
+instrument_type_mapping:
+  hoa_lien: ["HOMEOWNERS", "HOA", "CONDOMINIUM", "PROPERTY OWNERS"]
+  federal_tax_lien: ["FEDERAL TAX LIEN"]
+  state_tax_lien: ["STATE TAX LIEN"]
+  mechanics_lien: ["MECHANIC", "MATERIALMAN"]
+  lis_pendens: ["LIS PENDENS"]
+  deed_under_power: ["DEED UNDER POWER", "FORECLOSURE DEED"]

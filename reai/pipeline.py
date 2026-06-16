@@ -1,0 +1,39 @@
+from __future__ import annotations
+import csv
+from pathlib import Path
+from typing import Iterable
+from pydantic import TypeAdapter
+from reai.models import LeadKey, SourceRecord
+from reai.scoring import distress_score
+from reai.sources.fema_nfhl import FemaNFHLAdapter
+from reai.sources.pacer_bankruptcy import PacerBankruptcyAdapter
+from reai.sources.gsccca_csv import GSCCCAExportAdapter
+
+
+def default_sources(gsccca_dir: str = "data/gsccca_exports", include_pacer: bool = False):
+    sources = [FemaNFHLAdapter(), GSCCCAExportAdapter(gsccca_dir)]
+    if include_pacer:
+        sources.append(PacerBankruptcyAdapter())
+    return sources
+
+
+def run_for_leads(leads: Iterable[LeadKey], sources=None) -> list[dict]:
+    sources = sources or default_sources()
+    output = []
+    for lead in leads:
+        records: list[SourceRecord] = []
+        for source in sources:
+            try:
+                records.extend(source.search(lead))
+            except Exception as e:
+                records.append(SourceRecord(source=source.name, owner_name=lead.owner_name,
+                                            parcel_id=lead.parcel_id, property_address=lead.property_address,
+                                            raw={"error": str(e)}))
+        output.append({"lead": lead.model_dump(), "score": distress_score(records),
+                       "records": [r.model_dump(mode="json") for r in records]})
+    return output
+
+
+def load_leads_csv(path: str) -> list[LeadKey]:
+    rows = list(csv.DictReader(open(path, newline="")))
+    return [LeadKey(**r) for r in rows]
