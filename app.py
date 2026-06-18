@@ -17,12 +17,13 @@ def main():
     leads = load_leads_csv(args.leads)
     sources = default_sources(args.gsccca_dir, include_pacer=args.include_pacer)
     for s in sources:
-        print(s.healthcheck().model_dump())
+        try:
+            print(s.healthcheck().model_dump())
+        except Exception as e:
+            print(f"[WARN] {s.name} healthcheck failed: {e}")
     results = run_for_leads(leads, sources)
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(json.dumps(results, indent=2))
     print(f"wrote {args.out}")
 
 
-if __name__ == "__main__":
-    main()
