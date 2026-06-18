@@ -1,0 +1,917 @@
+From 51f483435046face707fa98a1c73d99a11be4a4a Mon Sep 17 00:00:00 2001
+From: Manus AI <manus@reai.dev>
+Date: Wed, 17 Jun 2026 06:13:41 +0000
+Subject: [PATCH] Fix PACER adapter: proper authentication flow with
+ X-NEXT-GEN-CSO token
+
+- Rewrote pacer_bankruptcy.py to use correct PACER PCL API auth flow:
+  1. Authenticate via POST to pacer.login.uscourts.gov/services/cso-auth
+  2. Use returned nextGenCSO token in X-NEXT-GEN-CSO header for searches
+  3. POST to pcl.uscourts.gov/pcl-public-api/rest/parties/find with proper JSON body
+- Fixed 406 error: was using basic auth instead of token-based auth
+- Added jurisdictionType='bk' and GA court IDs filter to party search
+- Made FEMA optional in pipeline (skip by default since leads lack lat/lon)
+- Added graceful healthcheck error handling in app.py
+- Added .gitignore for pycache, .env, and output files
+- Added convert_leads.py for Excel-to-CSV conversion
+- Added test scripts for PACER auth and search verification
+- Removed tracked __pycache__ files
+---
+ .gitignore                                    |   5 +
+ app.py                                        |   5 +-
+ convert_leads.py                              |  26 ++++
+ data/gsccca_exports/.gitkeep                  |   0
+ leads.csv                                     | 128 ++++++++++++++++++
+ pacer_api_notes.md                            |  32 +++++
+ reai/__pycache__/__init__.cpython-313.pyc     | Bin 165 -> 0 bytes
+ reai/__pycache__/http.cpython-313.pyc         | Bin 1088 -> 0 bytes
+ reai/__pycache__/models.cpython-313.pyc       | Bin 2976 -> 0 bytes
+ reai/__pycache__/pipeline.cpython-313.pyc     | Bin 2627 -> 0 bytes
+ reai/__pycache__/scoring.cpython-313.pyc      | Bin 1420 -> 0 bytes
+ reai/pipeline.py                              |   7 +-
+ .../__pycache__/__init__.cpython-313.pyc      | Bin 173 -> 0 bytes
+ reai/sources/__pycache__/base.cpython-313.pyc | Bin 1176 -> 0 bytes
+ .../__pycache__/fema_nfhl.cpython-313.pyc     | Bin 2948 -> 0 bytes
+ .../__pycache__/gsccca_csv.cpython-313.pyc    | Bin 6116 -> 0 bytes
+ .../pacer_bankruptcy.cpython-313.pyc          | Bin 3818 -> 0 bytes
+ reai/sources/pacer_bankruptcy.py              | 124 ++++++++++++++---
+ test_pacer_auth.py                            |  37 +++++
+ test_pacer_search.py                          |  45 ++++++
+ 20 files changed, 386 insertions(+), 23 deletions(-)
+ create mode 100644 .gitignore
+ create mode 100644 convert_leads.py
+ create mode 100644 data/gsccca_exports/.gitkeep
+ create mode 100644 leads.csv
+ create mode 100644 pacer_api_notes.md
+ delete mode 100644 reai/__pycache__/__init__.cpython-313.pyc
+ delete mode 100644 reai/__pycache__/http.cpython-313.pyc
+ delete mode 100644 reai/__pycache__/models.cpython-313.pyc
+ delete mode 100644 reai/__pycache__/pipeline.cpython-313.pyc
+ delete mode 100644 reai/__pycache__/scoring.cpython-313.pyc
+ delete mode 100644 reai/sources/__pycache__/__init__.cpython-313.pyc
+ delete mode 100644 reai/sources/__pycache__/base.cpython-313.pyc
+ delete mode 100644 reai/sources/__pycache__/fema_nfhl.cpython-313.pyc
+ delete mode 100644 reai/sources/__pycache__/gsccca_csv.cpython-313.pyc
+ delete mode 100644 reai/sources/__pycache__/pacer_bankruptcy.cpython-313.pyc
+ create mode 100644 test_pacer_auth.py
+ create mode 100644 test_pacer_search.py
+
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..6d9809a
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,5 @@
++__pycache__/
++*.pyc
++.env
++.venv/
++data/output/
+diff --git a/app.py b/app.py
+index 5765a90..197195d 100644
+--- a/app.py
++++ b/app.py
+@@ -17,7 +17,10 @@ def main():
+     leads = load_leads_csv(args.leads)
+     sources = default_sources(args.gsccca_dir, include_pacer=args.include_pacer)
+     for s in sources:
+-        print(s.healthcheck().model_dump())
++        try:
++            print(s.healthcheck().model_dump())
++        except Exception as e:
++            print(f"[WARN] {s.name} healthcheck failed: {e}")
+     results = run_for_leads(leads, sources)
+     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+     Path(args.out).write_text(json.dumps(results, indent=2))
+diff --git a/convert_leads.py b/convert_leads.py
+new file mode 100644
+index 0000000..e19bbb8
+--- /dev/null
++++ b/convert_leads.py
+@@ -0,0 +1,26 @@
++"""Convert the uploaded dialer contacts Excel file to pipeline-compatible leads CSV."""
++import pandas as pd
++
++df = pd.read_excel("/home/ubuntu/upload/DialerContacts[June17,2026].xlsx")
++
++# Build the leads CSV with required columns
++leads = pd.DataFrame()
++leads["owner_name"] = df["Full Name"].fillna(df["Last Name"]).str.strip()
++leads["parcel_id"] = ""  # Not available in this dataset
++leads["property_address"] = (
++    df["Property Address"].fillna("").str.strip() + ", " +
++    df["Property City"].fillna("").str.strip() + ", " +
++    df["Property State"].fillna("").str.strip() + " " +
++    df["Property Zip"].fillna("").astype(str).str.strip()
++)
++leads["county"] = ""  # Not available; PACER searches by state + name anyway
++leads["state"] = df["Property State"].fillna("GA").str.strip()
++
++# Drop rows with no owner name
++leads = leads[leads["owner_name"].notna() & (leads["owner_name"] != "")]
++leads = leads.reset_index(drop=True)
++
++output_path = "/home/ubuntu/reai_ga_pipeline_v1/leads.csv"
++leads.to_csv(output_path, index=False)
++print(f"Converted {len(leads)} leads to {output_path}")
++print(leads.head(10).to_string())
+diff --git a/data/gsccca_exports/.gitkeep b/data/gsccca_exports/.gitkeep
+new file mode 100644
+index 0000000..e69de29
+diff --git a/leads.csv b/leads.csv
+new file mode 100644
+index 0000000..2457fb7
+--- /dev/null
++++ b/leads.csv
+@@ -0,0 +1,128 @@
++owner_name,parcel_id,property_address,county,state
++Bynum Cynthia F,,"1752 N HADAWAY RD, KENESSAW, GA 30152",,GA
++Setzer Stephen A & Daughtry Martha T,,"6310 BRAIDWOOD OVERLOOK, ACWORTH, GA 30101",,GA
++Kershner Arnold Laurie Ann,,"4965 HAMPSTEAD LN, ACWORTH, GA 30101",,GA
++Samarakoon Carolena B,,"1821 HANNAH PL, POWDER SPRINGS, GA 30127",,GA
++Nelson Swedette G,,"1755 BRIDGESTONE CT, MARIETTA, GA 30066",,GA
++Martin Avery,,"4561 GROVE PARK WAY NW, ACWORTH, GA 30101",,GA
++Berdine Sara Louise Vaughn,,"1183 JUSTICE DRIVE NW, KENNESAW, GA 30152",,GA
++Carter Rosemary Shipp,,"2216 ORCHARD PARK CIRCLE NW, KENNESAW, GA 30152",,GA
++Roberts Anne B,,"4006 LAKE ACWORTH DR NW, ACWORTH, GA 30101",,GA
++Angulo Ferrin Benicia M; Mendez Ciro Arquimedes,,"2535 FAIRMONT PARK CT, DACULA, GA 30019",,GA
++Song Chang Y; Song Hyun Hee,,"545 SETTLES BROOK CT, SUWANEE, GA 30024",,GA
++Brown Adrienna S; Brown Timmy Lee,,"4350 PORTCHESTER WAY, SNELLVILLE, GA 30039",,GA
++Wilson English Bret; Johnson Brandon Dex,,"2238 WELL SPRINGS DRIVE, BUFORD, GA 30519",,GA
++Hawkins Nathan S & Ann P,,"1030 N POINT DR, ROSWELL, GA 30075",,GA
++Bhardwaj Priya,,"2651 STREAM TERRACE NW, ATLANTA, GA 30318",,GA
++Healey Partners Llc,,"57 FORSYTH ST NW APT 5D, ATLANTA, GA 30303",,GA
++Crockett Aaron,,"7262 WALTON HILL, FAIRBURN, GA 30213",,GA
++Jones Patricia D & Garrett Floyd P,,"2723 MARGARET MITCHELL DR NW, ATLANTA, GA 30327",,GA
++Paramount At Buckhead Condo Association Inc,,"3445 STRATFORD ROAD #2805, ATLANTA, GA 30326",,GA
++Young Steven Matthew & Carolyn,,"2823 DELOWE DR, ATLANTA, GA 30344",,GA
++Barabino Rodney,,"215 NOWELL DR, FAIRBURN, GA 30213",,GA
++Gatison Breanna R,,"4318 SAVANNAH LANE, ATLANTA, GA 30349",,GA
++Grimes Vivian,,"1989 GRANT ROAD SW, ATLANTA, GA 30331",,GA
++Carter James D,,"334 ARGUS CIRCLE NW, ATLANTA, GA 30331",,GA
++Jones Annie Frances,,"996 WYLIE ST SE, ATLANTA, GA 30316",,GA
++Faulkner Pamela Dawn P,,"4002 WIEUCA RD NE, ATLANTA, GA 30342",,GA
++Godwin Joann R,,"461 GRANT ST SE, ATLANTA, GA 30312",,GA
++James Julia M,,"2031 COUNTY LINE RD, ATLANTA, GA 30331",,GA
++Snider Clay,,"397 7TH STREET NE, ATLANTA, GA 30308",,GA
++Terrell Brandi,,"2445 VILLAGE GREEN DR, FAIRBURN, GA 30213",,GA
++Meissner Jake & Meissner Trinity,,"5065 RABBIT FARM RD, LOGANVILLE, GA 30052",,GA
++Worku Ashenafi,,"4141 DEAN GROVE WAY, LOGANVILLE, GA 30052",,GA
++Younge Michaela,,"4922 WALDEN LAKE SQ, DECATUR, GA 30035",,GA
++Oliver Christopher,,"7860 MOHANSIC PARK LN, LITHONIA, GA 30058",,GA
++Ramsey Larry Darnell,,"3291 WINTERCREEPER DR, LITHONIA, GA 30038",,GA
++Tchoute Steve Alain O,,"4980 STONE TRACE, STONE MOUNTAIN, GA 30083",,GA
++Elman Svetlana,,"2397 WOODACRES RD NE, ATLANTA, GA 30345",,GA
++Belgrave Bevon,,"5566 STRATHMOOR MANOR CIR, LITHONIA, GA 30058",,GA
++George Graceson,,"4792 CEDAR PARK WAY, STONE MOUNTAIN, GA 30083",,GA
++Haynes Glenda,,"4654 HOPE SPRINGS ROAD, STONE MOUNTAIN, GA 30083",,GA
++Thomas Tiara,,"892 N SUPERIOR AVE, DECATUR, GA 30033",,GA
++Cooper Patricia A,,"7196 IVERSON TRAIL, LITHONIA, GA 30058",,GA
++Grider Marilea; Miller Kirk,,"1501 CLAIRMONT RD #2012, DECATUR, GA 30033",,GA
++Brown David; Crenshaw Myrna,,"3633 BORING ROAD, DECATUR, GA 30034",,GA
++Reymond Lucinda Redding,,"3608 SHERRYDALE LN, DECATUR, GA 30032",,GA
++Felix Marissa Chantel Or White Elizabeth Marie,,"2282 JOPLIN ST, JONESBORO, GA 30236",,GA
++Taylor Allisha K Or Yaman F,,"7515 GARNET DR, JONESBORO, GA 30236",,GA
++Hinton Colvin C Jr,,"6732 BROOKWOOD CIRCLE, JONESBORO, GA 30236",,GA
++Washington Devyne Wendell,,"5246 CARRIE DR, MORROW, GA 30260",,GA
++Malone Shelia,,"6537 RIVER GLEN DR, RIVERDALE, GA 30296",,GA
++Barr Dorris L Gorham,,"1542 KEYSTONE DRIVE, CONLEY, GA 30288",,GA
++Bean Verna Or Gerald,,"6595 PIAZZA DR, JONESBORO, GA 30238",,GA
++Bryant Michelle Trinette,,"8039 WOODS LN, JONESBORO, GA 30236",,GA
++Brown Tonya V,,"1191 BAKER DR, MACON, GA 31206",,GA
++Howard Martha,,"4445 SUMMERHILL DR, MACON, GA 31204",,GA
++Jackson Derrick Lamont,,"5478 CASCADE AVE, MACON, GA 31206",,GA
++Castillo Richard & Victoria,,"3309 SANDY CIRCLE, MACON, GA 31216",,GA
++Scales Desmond K & Alisa,,"1606 AVERY DR, LOCUST GROVE, GA 30248",,GA
++Harshbarger Michael L,,"1215 BROWNS COUNTRY LN, LOCUST GROVE, GA 30248",,GA
++Lewis Jamie L & Asa S Sr,,"1581 GALLUP DRIVE, STOCKBRIDGE, GA 30281",,GA
++Prentice Granison N Iii,,"254 HAMILTON POINTE DR, MCDONOUGH, GA 30253",,GA
++Dubose John Jr,,"401 YOUNG JAMES CIR, STOCKBRIDGE, GA 30281",,GA
++Miller Mario D & Tonia,,"764 ALBERTA DR, MCDONOUGH, GA 30252",,GA
++Shofner Derrick & Devona Stalnaker-Shofn,,"925 MICHIGAN CIR, HOSCHTON, GA 30548",,GA
++Jenkins Gary D,,"127 VIVID LN, DALLAS, GA 30132",,GA
++Fritts Shannon M; Fritts Buckley Oneal,,"6586 NEBO ROAD, HIRAM, GA 30141",,GA
++Pemberton Sarah Renee & Sadusky Stacy Christopher,,"1025 SPOTSWOOD CIRCLE, EVANS, GA 30809",,GA
++"Buttrey, Darrell T",,"8855 DAERWATER DRIVE, WINSTON, GA 30187",,GA
++"Roberts, Altha",,"8345 MOSSYBROOK LANE, DOUGLASVILLE, GA 30135",,GA
++"Bailey, Gregory",,"4320 BRONTE LN, DOUGLASVILLE, GA 30135",,GA
++"Kimbrough, Daryl A",,"3690 LINDSY BROOKE CT, DOUGLASVILLE, GA 30135",,GA
++Kaleta Marjorie J,,"113 LINDA DR, WARNER ROBINS, GA 31093",,GA
++Lynn William R,,"1940 OLD CONCORD DR, COVINGTON, GA 30016",,GA
++Aning Clifford,,"50 CRABAPPLE RIDGE DRIVE, OXFORD, GA 30054",,GA
++Matthews Barry A,,"220 MILLS CRK LN, COVINGTON, GA 30016",,GA
++Dyer Carling,,"530 CREEKVIEW BLVD, COVINGTON, GA 30016",,GA
++Dixon Jeffrey & Tanya,,"715 FREEMAN DR, COVINGTON, GA 30016",,GA
++Hall James Gregory & Tara,,"6309 SANDPIPER DR, VALDOSTA, GA 31601",,GA
++Adams Brandon & Adams Kali,,"5225 PINE NEEDLE DR, COLUMBUS, GA 31907",,GA
++Paul Kenneth Jr,,"917 BUNKER HILL RD, COLUMBUS, GA 31907",,GA
++Carter Katina,,"3008 POMMEL CT, CONYERS, GA 30013",,GA
++Deerwood Point Llc,,"1113 MONTCLAIR DR, HINESVILLE, GA 31313",,GA
++Ward Jodie Alexandria,,"4322 ACACIA DRIVE, COLUMBUS, GA 31904",,GA
++Cotton Roger & Wanda D,,"214 PARK HILL DRIVE, LAGRANGE, GA 30240",,GA
++Lewis Sr Eugene,,"228 S HUDSON ST, PLAINS, GA 31780",,GA
++Banegas Ruth D Murray & Kevin Banegas,,"4441 WAYCROSS HWY, JESUP, GA 31545",,GA
++Harn Linda M,,"279 MONTAUK LANE, RICHMOND HILL, GA 31324",,GA
++Self Elizabeth,,"9 KINGS COURT NE, ROME, GA 30161",,GA
++Johnson Joan D,,"139 N MAIN STREET, WATKINSVILLE, GA 30677",,GA
++Alford Evelyn R,,"1600 LEE ST, BRUNSWICK, GA 31520",,GA
++Smith Charmayne,,"137 HUNTS ML CIR, GRIFFIN, GA 30224",,GA
++Boyd Ruby,,"2471 SANDERS RD, ELBERTON, GA 30635",,GA
++Pugh Mark P,,"133 VIRGINIA CIRCLE, CEDARTOWN, GA 30125",,GA
++Spry Christopher E,,"53 HOLLOW HILL SPUR, BLAIRSVILLE, GA 30512",,GA
++Bittick Charles,,"2274 BETHESDA CHURCH RD, CARROLLTON, GA 30117",,GA
++Grizzle Harve H & Betty,,"509 HILLSIDE DR, HIAWASSEE, GA 30546",,GA
++Torano Deneb,,"212 WITCHER ROAD, NEWNAN, GA 30263",,GA
++Thomas Olympia,,"1032 DEMMOND ST, SAVANNAH, GA 31415",,GA
++Wendel Daniel J & E Ashley Wendel,,"340 SMOKEY ROAD, NEWNAN, GA 30263",,GA
++Aaron Beverly K; Aaron Eric B,,"4371 CAMARON WAY, SNELLVILLE, GA 30039",,GA
++Wright Florine Green,,"172 CHURCH ST SW, FUNSTON, GA 31753",,GA
++Ferlingere Haley M,,"11 PINE PARK DR SE, ROME, GA 30161",,GA
++"Nolan, David",,"62 MCCLURE RD, TEMPLE, GA 30179",,GA
++Davis Jennifer Pamela,,"9356 WINDCHASE WAY, JONESBORO, GA 30238",,GA
++Commodore Shene,,"1088 AMBERTON LANE, POWDER SPRINGS, GA 30127",,GA
++Hendrickson Joy M & Dar,,"1761 WOODVILLE RD, UNION POINT, GA 30669",,GA
++Dalzon Veronica,,"5102 CHASTLETON DR, STONE MOUNTAIN, GA 30087",,GA
++Ruppert Dalroy,,"7980 HWY 96, FORT VALLEY, GA 31030",,GA
++Jefferson Morgan,,"1038 WESTMOOR DR NW, ATLANTA, GA 30314",,GA
++Daniels Ashawn,,"1301 RIVER CLUB DR, CONYERS, GA 30012",,GA
++Middaugh Joseph K,,"2104 MONACO DR, COLUMBUS, GA 31903",,GA
++Hagan Richard Glen & Ellen Lee,,"968 LISMORE DRIVE, COLUMBUS, GA 31904",,GA
++Jones Gerald J & Margie Louise,,"251 S ROBINSON ST, LENOX, GA 31637",,GA
++Denney Kenneth Sr,,"3402 DEERWOOD CT, REX, GA 30273",,GA
++Whinnett Amy; Fitzpatrick Paul,,"2491 FIELDVIEW WAY, BUFORD, GA 30519",,GA
++Allen Dorothy Clark,,"625 MARSHALL STREET, THOMASVILLE, GA 31792",,GA
++Finch Kyle Lindsey,,"100 RACHEL CT, GUYTON, GA 31312",,GA
++Austell Kalil Leshon,,"4281 ARCADIA DRIVE, DECATUR, GA 30034",,GA
++Mcghee Yolanda Hill & Travis Maurice,,"661 LAUREL WOOD DR SW, MARIETTA, GA 30064",,GA
++Grant Helen Lynan,,"2549 BRADY RD, LESLIE, GA 31764",,GA
++Turner Jerome T Jr & Kyla,,"1229 MCALLISTAR DR, LOCUST GROVE, GA 30248",,GA
++"Fenelus, Erventz",,"1804 ACKER DR, ALBANY, GA 31707",,GA
++Black Gladys B,,"2868 FLORENCE DR, GAINESVILLE, GA 30504",,GA
++Russell James C Iii,,"3328 HILTON WOODS DR, COLUMBUS, GA 31906",,GA
++Searson Heyward J Ii,,"2514 PEACH BLOSSOM PASS, HEPHZIBAH, GA 30815",,GA
++Chamberlin Robert John & Stina M Smith,,"906 HICKS RD, ROBERTA, GA 31078",,GA
++Rodriguez Christopher; Mcaulay Aisha,,"1945 CINDY DR, DECATUR, GA 30032",,GA
+diff --git a/pacer_api_notes.md b/pacer_api_notes.md
+new file mode 100644
+index 0000000..9744532
+--- /dev/null
++++ b/pacer_api_notes.md
+@@ -0,0 +1,32 @@
++# PACER PCL API Notes
++
++## Authentication
++- POST to: https://pacer.login.uscourts.gov/services/cso-auth
++- Content-Type: application/json
++- Body: {"loginId": "username", "password": "password", "clientCode": "code"}
++- Response: {"nextGenCSO": "128-char-token", "loginResult": "0", "errorDescription": ""}
++
++## Party Search
++- POST to: https://pcl.uscourts.gov/pcl-public-api/rest/parties/find
++- Headers:
++  - Content-Type: application/json
++  - Accept: application/json
++  - X-NEXT-GEN-CSO: <token from auth>
++- Body:
++```json
++{
++  "lastName": "Smith",
++  "jurisdictionType": "bk",
++  "courtCase": {
++    "courtId": ["ganbk", "gasbk", "gambk"]
++  }
++}
++```
++
++## Key Points
++- 406 error means "invalid search parameter" or missing Accept header
++- The original code used basic auth instead of X-NEXT-GEN-CSO token
++- Must first authenticate, then use the token in headers
++- lastName is used for both person last names AND entity/business names
++- jurisdictionType "bk" limits to bankruptcy cases
++- Georgia bankruptcy courts: ganbk (Northern), gasbk (Southern), gambk (Middle)
+diff --git a/reai/__pycache__/__init__.cpython-313.pyc b/reai/__pycache__/__init__.cpython-313.pyc
+deleted file mode 100644
+index eeb0ccf7420f3e8ee18bcc28fc92ef37bf21eac6..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 165
+zcmey&%ge<81opyuSs?l`h=2h`DC08=kTI1Zok5e)ZzV$!6Oi{ABz4Qh*(xTqIJKxa
+z#=oE>vmht6!rZ{jAjT!XJTE6dF{L=BC^a!NK0PtMAhRGfCo?ZKzRVCT784(znU`4-
+lAFo$Xd5gm)H$SB`C)KWq6=*2P(qa(fBQql-V-Yiu1pvXhD69Yg
+
+diff --git a/reai/__pycache__/http.cpython-313.pyc b/reai/__pycache__/http.cpython-313.pyc
+deleted file mode 100644
+index f70919711cad3f26f5ee24d5188fbd210f748172..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 1088
+zcmaJ=%}*0S6rXAL3rYnP6*)D^WfLh714e=$jS{{RA>DGK$!2M%WnsHpXJ!TJrJVHW
+zK@$%iJnF&3qkn=&P!h-p35h2>Y4Gdln{A8npl_2m@BQA)``+VZvK;~4Jd<9@#1Q%<
+zl@@_62_KIEe~K(*;aN0;DNac_HXEZcIODVN8HFklrp&4{8r4A7EVU1<C{!=UO#Mi@
+zF|kNEz8`RhyMfQ{N_{Gqo6i)TDkl_FHA^_%D9Fn#Y6BrIQ}_(RQ?%H^QMQ@f2>`-H
+zG}2Ukw5YZ$7LLA{6}J>iy{7qi0cG`;_0MT(i!xe73)s@H;gM#H6#B;t<G(MW#<n~*
+z&TR5;U20aF)jotraKj>F^&>NJ_Xx^H<py|o(^TEpaKrs3*$>HnO7;tw858lziJVa8
+z=d7Hm36(>OJ)su@-zNnw6iS?;IJM*yR)bQ>E;$7rP|?L;4k5Ek0WA>EWn6SRo)@f<
+zqFo_;IViH4vCMgujSUXUNmZP6o5FZp!fLuS0A6cfV1y22%Eafj%h`#{^uT0hVBW2Q
+zL!S%|rH50H1c!jvH-hjMS$8T`kE9Dh#ngpC$-R&;&V+6e#$Y9=9GOrnLFjX;NLgQo
+z)Cpxm3#&zk6DSokp~^fqm>f<jC2rjw%gZ!aey+-0@V|a_XmlulCs^~nz$vmkl<(SQ
+z$F4T>vhNQ^SYB3<u5O4P)`)MfxqP`*B)tIc<(9BjV0E-_bnP0w?~UFMMqfR%-_iXH
+zzZiZw{MOpLH2yC58plZ+*C!4Y_2J~^<fEDAi8tzY@92(lb*~9cKY8#n+&(|Dql`*u
+zdUJYL>Dg9#9(!B;*{!qIj*{C;bkwJgA)K74233aCuXVNhly0`kG(@{?mqM@-+op0&
+zXg4s?eR9)j{8FsZ#nU16Ja_3zI^?dGj+z&>Ix6uMqJ7dsuk>JySAt^bksCAxD(n_w
+b=YV~QV~h{b#gC}-0GS7<|GTE+Wc2PgtK<%k
+
+diff --git a/reai/__pycache__/models.cpython-313.pyc b/reai/__pycache__/models.cpython-313.pyc
+deleted file mode 100644
+index 694eb5af2339a41a28e8a87c75e495b0ca024171..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 2976
+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
+
+diff --git a/reai/__pycache__/pipeline.cpython-313.pyc b/reai/__pycache__/pipeline.cpython-313.pyc
+deleted file mode 100644
+index fccc9b4821a0137b7456c816605a50246f73b08b..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 2627
+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
+
+diff --git a/reai/__pycache__/scoring.cpython-313.pyc b/reai/__pycache__/scoring.cpython-313.pyc
+deleted file mode 100644
+index 826d504b6f3b8c3cf41862e4076ddbe08a87ea43..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 1420
+zcmZ`&L2nyX5T3WYwl`keZ4xITNkgoJi>qP+l0gCrf~KM*YEiwlIM~r@v-{$1*z7KE
+z*EHdjV_ObQMXQ<<9O2(!1*zuIss~QKr3y&Bg?Vecjv_OX=Y8|d%zNXR+2d?B4Je;Z
+zmbMQifWL(?kbDo2<BJ5~G3cO^byy>e6a<#mr8Sw!F_zbrwFFD7C0Vin^+Y8%xMFzf
+z3i9WN_5kS#<R=E!@QnF>1w$4<Ph$M^X{Lu`{*4iQ3ghQS@G9~b{)c~a1TX3@jNr#s
+z(rjGM=;=AwR@g*CD`vYQtVp<KdY&Jdk>h)zFm1YJHr>c}tf(mQbcI?zvv2JMlxK9m
+z$t>Dqy5etlMNhgJp=N~=B{{E7PEITw#%oC-k^#u^D+G_B_S#qOhj>IMo>YZNxTXVm
+za#gP2n9oX;e1w#Vp6gQpRZ>ZujX-u}X1V`j0jg3hImoJv4bbo$ov)K}zn-_VSf6yg
+z3ZOv&YT6)ECpGl+M3<`4AbxPZ1x5J=6PI*tRK*mRLmF|7#oaX`(O%iKZJzr2>X%<!
+zyQOovfqr?%+(qShMTMt&u_0GNN<E$kaW0e-7AkmQ0fk?=@?pIiQWn;~3L+<P>Fx(B
+z@2}KX{X3rPn|4@d)O3u7X#`F{UB{!wckjkrUEJk(jZ(13bG8#kjE12RKfuIRPU0`5
+zsP^HRmiwW+zuL)U_pkny&EF**E%V^=z00lDL#^;<Cf`vr57c|=!T6JfhYNqGiybxl
+zXy(cM!}-?DpErKm`1P~H@lsnY-A}w6gWS|VX~>+r`|YFU1FKd3@ts3$>33!67$1Tg
+zMTOy%;rj^}>#3dIybYdYG-@)B%Z?WnCwba1wwg##!(g~)z%|QvU24TE%|v@dqfMu@
+z<J;5?nb;d9)_|usP464l3?gfftG9jAa2;%|8kxI2l-r@!ZPRnCu<zM!+KnCR;pDI^
+zBcPs5y^x=`DYcCz8q5g%JCt#43x{L5eu!1^RKWaAGon1P<@&zO#>M-hufGAC7g&5d
+zT>Ti!Yr6Ckb_q?fvEhAGM=~MgIV?Sg<rlDWl!U~&r^;+wnQgt-QF2d}nYJ?1nm7v=
+z+R8$Uon`0R%3SO7m|biui@)^JPO;N%Wx6HB0r|F)KiE8)(llv5_3s6hEXTF}2L=;2
+A?EnA(
+
+diff --git a/reai/pipeline.py b/reai/pipeline.py
+index 87eaa10..eb4bbba 100644
+--- a/reai/pipeline.py
++++ b/reai/pipeline.py
+@@ -10,8 +10,11 @@ from reai.sources.pacer_bankruptcy import PacerBankruptcyAdapter
+ from reai.sources.gsccca_csv import GSCCCAExportAdapter
+ 
+ 
+-def default_sources(gsccca_dir: str = "data/gsccca_exports", include_pacer: bool = False):
+-    sources = [FemaNFHLAdapter(), GSCCCAExportAdapter(gsccca_dir)]
++def default_sources(gsccca_dir: str = "data/gsccca_exports", include_pacer: bool = False, include_fema: bool = False):
++    sources = []
++    if include_fema:
++        sources.append(FemaNFHLAdapter())
++    sources.append(GSCCCAExportAdapter(gsccca_dir))
+     if include_pacer:
+         sources.append(PacerBankruptcyAdapter())
+     return sources
+diff --git a/reai/sources/__pycache__/__init__.cpython-313.pyc b/reai/sources/__pycache__/__init__.cpython-313.pyc
+deleted file mode 100644
+index 59e8bda90e350b5beb45e50e1d7abb742030570f..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 173
+zcmey&%ge<81opyuSs?l`h=2h`DC08=kTI1Zok5e)ZzV$!6Oi{ABz4Qj*(xTqIJKxa
+z#=oE>vmht6!rZ{jAjT!XJTE6dF{L=BC^a!NK0PtMAhRGfCo?ZKzRVCT7E_#GT9lkx
+t91|a(nU`4-AFo$Xd5gm)H$SB`C)KWq6=*of@?sF<BQql-V-Yiu1pr<BEEE6$
+
+diff --git a/reai/sources/__pycache__/base.cpython-313.pyc b/reai/sources/__pycache__/base.cpython-313.pyc
+deleted file mode 100644
+index 288f0ce4937a8ef971162c2c9a5124120a9c6d4a..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 1176
+zcmY*Y&u<e)6rR~#uh({ds3agt)Yb$LS_wr|DpY|AMAJ&duFQ`GE^IX#uP5<_^{)G7
+zOdC!}9Juz9dwZ&S>#=`ExK*PfDzz7GNG{^ad%F%w=J4j5dGF19-+MFD`S~WpaeZlR
+z=TFYqzqB|QwF>a*0|a|4ViE7M4hP;Q>~x)u3vR~)uUxy`TE_>!#9p`F2_Wb+pwVeU
+zv&~MjRTkAwvB;0zOKx>8w6^PE@R}AOw=J3Hg^?yLaveI>z47&iU66fkKqh9S%&-_>
+zRIq6j$bP0m*VeyNa?n+~b}lL=kf@tVW@dP>x~q}`21#{QWoP&D=`~#Mv6umm7&s9J
+z_Z;epy~sU}p12kTk#~yic$a3`;71K&zvDqY@*zOpO*>!RdSf8R$mw+*W37vHt(VJ@
+zN}O3PO;}ilm-FcYf<5+-_R67n$a^SjsaKfI(Ku5hl^Zqq7N7tuf~QrsWxWh_YC5mo
+zwl_Df#P_uV9p4(86f=JM^5W%-@i)bfc~)Rp3`(YATZ(ZyR#}=W@%Zy{FV<y|bljI(
+zt&MlBua$&kXqS)ZSgUsFQRo28Q}*A&>HXmJl=vnj<Y4#+N>LXOpr{YN`|R#v@w51d
+zM^5CfyJuPG_3k}ckX7B<#99rooqk2oI>jSfA1STnwhA2}5<qneIedhZrhD43gx0o(
+zWy_PHN*>vdkLoz&qHKKv%~SUG;>s^y{I>q<`X9^t*KfU8yuBaX26Fw*dZ7o$5JA~V
+zAC#Fu{^VGeYV)u<x_VOIBdJd*j+liF8wf!S7s57$7!`v_MtDw$A0{%Jc@~A(N<kZH
+zNM4{DHx9jbA%OlGER$J5V~-1==`$ok8Uty6VwA?HPbh%sminPZhzwEIpP_lq{%X!Y
+z+x(}tG<A4wb?P#I`3<3WKCj*3RW4=p!a3r*H9?ig7wB(TSN0R|5S4VSZ+6FNz75oA
+z+oFfHhWb>d%Mw+cX;5^@<0v;9d{x!r8iW`^P1CDr-ng9emu&SFJM)sQykb{hu&e+3
+P0l&k4-gwJsE;+sjS`#A>
+
+diff --git a/reai/sources/__pycache__/fema_nfhl.cpython-313.pyc b/reai/sources/__pycache__/fema_nfhl.cpython-313.pyc
+deleted file mode 100644
+index 9a00b208cbfb5a54738932f7e47b429ec578f697..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 2948
+zcmZuzU2GHC6~5yc+vA_u`LRhh0hF>(VV2soz^<|d(kvtdha_81%x+20XyUnchMmlq
+zd&f{`8!1nf^H7DTMKOJ8`qUs*+U-;Kkv_GLL6M4e1?ozzD&-BD{=D|w89ND9j^yKW
+z&;2|1obQ}7dmSBN1T@@}zP}kn=<j^cBEKgHd-EVXK?+iY36vFxFvw-!gfA-+(Urvs
+zDeEVGSC%FM*&qpKWg=%oB$N%4u&eh^M6yv59YlTT6jB2HND0nGFN@wCq@yIKLc4sB
+z5?DmDEZfl>!?q|4<>@jPH523n#gxK8ePlQbD!~phFilA;cpGc_1g^4h4i{{q&s58p
+zMHRb33V0lArnAr*dGl~ohc`Q-Yh?$Mf@g@wecqq2_aO*R&>SLyf{0HMh^Y98q=>|?
+zNd1Tel#t@@NB1QXRKomCAjwLQgy1z179Ycl+SJ(i?dBD`GMvUjW22KJDpxOEUvQi<
+z{Wz0Z(3Ui!({vFwq)Yb0j7AD2gJuY(PKILg&?sP<DOcuAqmbcSGm~0b0X^6)c(%Hn
+z+YKHS_D+HD1kLWxU2ZPQBXeI@0#{F^e1wOYN!%20ibSzlq<qaFo4o$<Tpn(xb36cL
+z6aVz13m;yXyJ0`FOk30G9Ko8QmNd0&l(A`8Sbg|?S2sspztcJX9@Q!?nCWtr$*O8t
+zhNG&iugx*()=UT7OQXP6(5uARoy57C^o!6QjL|#K41mIY<`xJ~P#)#@k~YdUp><dd
+zE2YC@PmTewFZvXpA`ba1VHVQBBUsHN)<$_D=cdfNYDEG)x4eyF2u}77iKkI2FtrpM
+zE?&J)ZEH6H%fQ<~$5_O6#aZ%?&&+%}m=amQa~<>9U$EdJU|lQWRFHJSdM1{z!{m95
+zVzoj{;-X2iv_(w%`E-Or%2cRYuyqV!?czFtP>zYgLDKCmS#VRKuz(9+uz~g{9Gc|!
+z(NSP4s1fa4yR~|2ZE|(8KJ%M<Pw&;Iw?5kLzxYkAHn|=BQB8OiAK1L~yP@9>eckoP
+z#2*sRlg}UgdHGMv&+YBuJ1^p&ZOfmLB%D-eCKZSX#o*^g@CTqh4Ai`!K&rLMg5^7a
+zFwFQ4&4_v5Je-gh`MDW%8Y!YBLBtN<;$FosgXl=W{TC(6uLSZU$ici1Vk0Utq;Ob?
+zC{d*&9kc>RBP6$viRO{;_xT+qro@NDT<Ad8l3M9z1vAK!^TDI`E1em1xoK?=8ed1q
+z3gtsbuI#$7ztRfl<y@q7&%ysJPaT)w1>C!BG|MCEQjQ~`jR3nGk!=LpV{IxJg0}An
+zZTLvbyDvA(%~j!SbCV9h97Oq}*Y~v6=fg@uNe;=a@gSP~B|;ItQ-)kRHpN6!bAUlI
+z9fy;dkXZ_39#k-?GKr@c6V9_POo?$5+l$a9s-N11<rx12Kd?ToSIW>}G&6_ITNc!R
+ziVF^9!a3$IY9@u8V?vS1rRHW9ZAorpkqk@8u`t~~f`uT9#|&)hl*OPcRfyHPclRWi
+zm-4YdStHsaCER&TE@H@4DDNz+IncxAD-Ou=*zFtY-RY@O7Uo=4@}JE7r1a~joOXv(
+zGI@{hjS#oPsSa;(fr4GJoGJ^!=>=@6hR!<6#4cmvR8>va;R*^x#jOlXB-$euF4$Jl
+z(6Lp(sSXx|n!+t0C*Wwe%n<HQ!lT6kTDgoZop6K`{tUwN06b*cwoa~a#Z}I(0ZT=^
+ziX)lOh{<WLJ_C&TO|6Ov6M4nr-IPhX=4ea=e=&)Bfe9MrfF3*`uUG{rhBqy+W9@ay
+z({sSmB*1G0{Uerqtk*|3FYUz6*2Guuj2e;H>JRJhKmDN5ldRopbavPLjjrUziS-kY
+z<Mjud$<5&A!|hnQCVt!1+ZZ@mKLg61O@BSsIG$-F`WpS08t)x%oILY3E_a7(fj8Z#
+zGqF}(t*$MvF4vWBx@*hZ@hdOmBQN43JMrr^sS)d}iLh~Fe0{urcdPraiSxA^jn2e|
+zye`*|Z<3wPbG4C1G`^Ny&Hn0VjoyKc>U#C}_g|*3y+~i<!!Osr+|s|Yo>_l!UQX*T
+zru9Z|-$rG<Qop;?d-i4T@Ycvzqt8aaKEHE*`1y~wl{;^PQeW)9Na~2c^`qqX-o#L6
+zPc7`0+?3!(6q-B>c%XEfMoJ>Qv=iP&$rP}qZquO7toJ?SeIMORg?Yo~-31zUSXCEo
+zy<&1Xs;Unvn%SI*t7_38)Zy*lvQ^cCi3_G4e*AYhyA6ybRh7fgD5wXBSJh|8wbYF`
+z;r-KPytPq|!=Ix@<k-rMZ{ss7<NuNb{|EmL`23#>|C9UuJ>EvXXDSurCKf9^rN9Q>
+z`B?z+!>~$(H+&Z2pDJnojpKdpKn}qe-h@r+`GF(b^^S{n*5xi}e#fMF&n3L;dnV3s
+ziT5-QsPYxhIoHTt&;cS5eIM8xQ4oaJ=+tX8@EV=_8@joJZoWqFg6|4Fj~D-g;Lkne
+E|4TH!cmMzZ
+
+diff --git a/reai/sources/__pycache__/gsccca_csv.cpython-313.pyc b/reai/sources/__pycache__/gsccca_csv.cpython-313.pyc
+deleted file mode 100644
+index c04bb8af31c05cd0551805f9f7a1ae46a73d3615..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 6116
+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
+
+diff --git a/reai/sources/__pycache__/pacer_bankruptcy.cpython-313.pyc b/reai/sources/__pycache__/pacer_bankruptcy.cpython-313.pyc
+deleted file mode 100644
+index 9b24d7094191581b9d8d129144f01104106a18b7..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 3818
+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
+DujpA-
+
+diff --git a/reai/sources/pacer_bankruptcy.py b/reai/sources/pacer_bankruptcy.py
+index 9045407..32c9ead 100644
+--- a/reai/sources/pacer_bankruptcy.py
++++ b/reai/sources/pacer_bankruptcy.py
+@@ -8,17 +8,67 @@ from reai.sources.base import SourceAdapter
+ class PacerBankruptcyAdapter(SourceAdapter):
+     name = "PACER_BANKRUPTCY"
+ 
++    # Georgia bankruptcy court IDs
++    GA_COURTS = ["ganbk", "gasbk", "gambk"]
++
+     def __init__(self, base_url: str | None = None):
+-        self.base_url = base_url or os.getenv("PACER_BASE_URL", "https://pcl.uscourts.gov/pcl-public-api/rest")
++        self.pcl_base = base_url or os.getenv(
++            "PACER_BASE_URL", "https://pcl.uscourts.gov/pcl-public-api/rest"
++        )
++        self.auth_url = os.getenv(
++            "PACER_AUTH_URL", "https://pacer.login.uscourts.gov/services/cso-auth"
++        )
+         self.username = os.getenv("PACER_USERNAME")
+         self.password = os.getenv("PACER_PASSWORD")
+         self.client_code = os.getenv("PACER_CLIENT_CODE", "REAI-GA-PIPELINE")
+         self.http = session_with_retries()
++        self._token: str | None = None
++
++    def _authenticate(self) -> str:
++        """Get X-NEXT-GEN-CSO token from PACER authentication service."""
++        payload = {
++            "loginId": self.username,
++            "password": self.password,
++            "clientCode": self.client_code,
++        }
++        r = self.http.post(
++            self.auth_url,
++            json=payload,
++            headers={"Content-Type": "application/json", "Accept": "application/json"},
++            timeout=30,
++        )
++        r.raise_for_status()
++        data = r.json()
++        login_result = data.get("loginResult", "")
++        if str(login_result) != "0":
++            error_desc = data.get("errorDescription", "Unknown error")
++            raise RuntimeError(
++                f"PACER auth failed (loginResult={login_result}): {error_desc}"
++            )
++        token = data.get("nextGenCSO")
++        if not token:
++            raise RuntimeError("PACER auth returned no nextGenCSO token")
++        self._token = token
++        return token
++
++    def _get_token(self) -> str:
++        """Return cached token or authenticate."""
++        if self._token:
++            return self._token
++        return self._authenticate()
+ 
+     def healthcheck(self) -> SourceHealth:
+         if not self.username or not self.password:
+-            return SourceHealth(source=self.name, ok=False, message="Missing PACER credentials")
+-        return SourceHealth(source=self.name, ok=True, message="credentials present; live search not run")
++            return SourceHealth(
++                source=self.name, ok=False, message="Missing PACER credentials"
++            )
++        try:
++            self._authenticate()
++            return SourceHealth(
++                source=self.name, ok=True, message="Authenticated successfully"
++            )
++        except Exception as e:
++            return SourceHealth(source=self.name, ok=False, message=f"Auth failed: {e}")
+ 
+     def search(self, lead: LeadKey) -> list[SourceRecord]:
+         if not lead.owner_name:
+@@ -26,25 +76,59 @@ class PacerBankruptcyAdapter(SourceAdapter):
+         if not self.username or not self.password:
+             raise RuntimeError("Missing PACER_USERNAME/PACER_PASSWORD")
+ 
+-        # PACER PCL API payloads should be confirmed against your account's current PCL API guide.
+-        # Keep endpoint configurable so you can adjust without changing code.
+-        url = f"{self.base_url}/parties/find"
+-        payload = {
+-            "lastNameOrBusinessName": lead.owner_name,
+-            "courtType": "bankruptcy",
+-            "state": "GA",
+-            "clientCode": self.client_code,
++        token = self._get_token()
++
++        # Use the full name as lastName — works for both persons and entities
++        search_body: dict = {
++            "lastName": lead.owner_name.strip(),
++            "jurisdictionType": "bk",
++            "courtCase": {
++                "courtId": self.GA_COURTS,
++            },
+         }
+-        r = self.http.post(url, json=payload, auth=(self.username, self.password), timeout=60)
++
++        url = f"{self.pcl_base}/parties/find"
++        headers = {
++            "Content-Type": "application/json",
++            "Accept": "application/json",
++            "X-NEXT-GEN-CSO": token,
++        }
++
++        r = self.http.post(url, json=search_body, headers=headers, timeout=60)
++
++        # If 401, token expired — re-authenticate and retry once
++        if r.status_code == 401:
++            token = self._authenticate()
++            headers["X-NEXT-GEN-CSO"] = token
++            r = self.http.post(url, json=search_body, headers=headers, timeout=60)
++
+         r.raise_for_status()
++
++        # Check for new token in response headers
++        new_token = r.headers.get("X-NEXT-GEN-CSO")
++        if new_token:
++            self._token = new_token
++
+         data = r.json()
+         records = []
+-        for item in data.get("content", data.get("parties", [])):
+-            records.append(SourceRecord(
+-                source=self.name, record_type=RecordType.bankruptcy, county=lead.county,
+-                owner_name=lead.owner_name, parcel_id=lead.parcel_id, property_address=lead.property_address,
+-                filing_date=item.get("dateFiled") or item.get("filedDate"),
+-                status=item.get("caseStatus"), case_number=item.get("caseNumber"),
+-                raw_reference=item.get("courtId"), raw=item, confidence=0.75
+-            ))
++        for item in data.get("content", []):
++            court_case = item.get("courtCase", {})
++            records.append(
++                SourceRecord(
++                    source=self.name,
++                    record_type=RecordType.bankruptcy,
++                    county=lead.county,
++                    owner_name=lead.owner_name,
++                    parcel_id=lead.parcel_id,
++                    property_address=lead.property_address,
++                    filing_date=court_case.get("dateFiled") or item.get("dateFiled"),
++                    status=item.get("caseStatus"),
++                    case_number=court_case.get("caseNumberFull")
++                    or item.get("caseNumberFull"),
++                    raw_reference=court_case.get("courtId") or item.get("courtId"),
++                    raw_url=court_case.get("caseLink"),
++                    raw=item,
++                    confidence=0.75,
++                )
++            )
+         return records
+diff --git a/test_pacer_auth.py b/test_pacer_auth.py
+new file mode 100644
+index 0000000..813c10f
+--- /dev/null
++++ b/test_pacer_auth.py
+@@ -0,0 +1,37 @@
++"""Quick test to debug PACER authentication."""
++import os
++import requests
++from dotenv import load_dotenv
++
++load_dotenv()
++
++auth_url = "https://pacer.login.uscourts.gov/services/cso-auth"
++username = os.getenv("PACER_USERNAME")
++password = os.getenv("PACER_PASSWORD")
++client_code = os.getenv("PACER_CLIENT_CODE", "REAI-GA-PIPELINE")
++
++print(f"Username: {username}")
++print(f"Password: {'*' * len(password) if password else 'MISSING'}")
++print(f"Client code: {client_code}")
++print(f"Auth URL: {auth_url}")
++print()
++
++payload = {
++    "loginId": username,
++    "password": password,
++    "clientCode": client_code,
++}
++
++print("Attempting authentication...")
++try:
++    r = requests.post(
++        auth_url,
++        json=payload,
++        headers={"Content-Type": "application/json", "Accept": "application/json"},
++        timeout=30,
++    )
++    print(f"Status: {r.status_code}")
++    print(f"Headers: {dict(r.headers)}")
++    print(f"Response: {r.text[:500]}")
++except Exception as e:
++    print(f"Error: {e}")
+diff --git a/test_pacer_search.py b/test_pacer_search.py
+new file mode 100644
+index 0000000..d72d4e4
+--- /dev/null
++++ b/test_pacer_search.py
+@@ -0,0 +1,45 @@
++"""Test PACER party search with a single lead."""
++import os
++import requests
++from dotenv import load_dotenv
++
++load_dotenv()
++
++# Step 1: Authenticate
++auth_url = "https://pacer.login.uscourts.gov/services/cso-auth"
++payload = {
++    "loginId": os.getenv("PACER_USERNAME"),
++    "password": os.getenv("PACER_PASSWORD"),
++    "clientCode": os.getenv("PACER_CLIENT_CODE", "REAI-GA-PIPELINE"),
++}
++r = requests.post(auth_url, json=payload,
++                  headers={"Content-Type": "application/json", "Accept": "application/json"},
++                  timeout=30)
++data = r.json()
++token = data["nextGenCSO"]
++print(f"Got token: {token[:20]}...")
++print()
++
++# Step 2: Party search
++pcl_url = "https://pcl.uscourts.gov/pcl-public-api/rest/parties/find"
++search_body = {
++    "lastName": "Bynum",
++    "firstName": "Cynthia",
++    "jurisdictionType": "bk",
++    "courtCase": {
++        "courtId": ["ganbk", "gasbk", "gambk"],
++    },
++}
++headers = {
++    "Content-Type": "application/json",
++    "Accept": "application/json",
++    "X-NEXT-GEN-CSO": token,
++}
++
++print(f"Searching for: {search_body}")
++print(f"URL: {pcl_url}")
++print()
++
++r2 = requests.post(pcl_url, json=search_body, headers=headers, timeout=60)
++print(f"Status: {r2.status_code}")
++print(f"Response: {r2.text[:1000]}")
+-- 
+2.43.0
+

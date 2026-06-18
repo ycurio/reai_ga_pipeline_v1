@@ -10,8 +10,11 @@ from reai.sources.pacer_bankruptcy import PacerBankruptcyAdapter
 from reai.sources.gsccca_csv import GSCCCAExportAdapter
 
 
-def default_sources(gsccca_dir: str = "data/gsccca_exports", include_pacer: bool = False):
-    sources = [FemaNFHLAdapter(), GSCCCAExportAdapter(gsccca_dir)]
+def default_sources(gsccca_dir: str = "data/gsccca_exports", include_pacer: bool = False, include_fema: bool = False):
+    sources = []
+    if include_fema:
+        sources.append(FemaNFHLAdapter())
+    sources.append(GSCCCAExportAdapter(gsccca_dir))
     if include_pacer:
         sources.append(PacerBankruptcyAdapter())
     return sources
