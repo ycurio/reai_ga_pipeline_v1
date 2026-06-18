@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os
+import re
 from reai.http import session_with_retries
 from reai.models import LeadKey, RecordType, SourceHealth, SourceRecord
 from reai.sources.base import SourceAdapter
@@ -70,6 +71,91 @@ class PacerBankruptcyAdapter(SourceAdapter):
         except Exception as e:
             return SourceHealth(source=self.name, ok=False, message=f"Auth failed: {e}")
 
+    def _normalize(self, name: str) -> str:
+        """Normalize a name for comparison: lowercase, strip suffixes and punctuation."""
+        name = name.lower().strip()
+        # Remove common suffixes
+        for suffix in ['jr', 'sr', 'ii', 'iii', 'iv', 'v']:
+            name = re.sub(rf'\b{suffix}\b', '', name)
+        # Remove punctuation and extra spaces
+        name = re.sub(r'[^a-z\s]', '', name)
+        return ' '.join(name.split())
+
+    def _name_matches(self, lead_name: str, pacer_result: dict) -> bool:
+        """Check if a PACER result matches the lead's name closely enough.
+
+        Matching strategy:
+          - lastName must match exactly
+          - firstName must match exactly (not just starts-with)
+          - If middle initial is available, use it to further filter
+        """
+        parsed = self._parse_name(lead_name)
+        search_last = self._normalize(parsed.get("lastName", ""))
+        search_first = self._normalize(parsed.get("firstName", ""))
+        search_middle = self._normalize(parsed.get("middleName", ""))
+
+        result_last = self._normalize(pacer_result.get("lastName", ""))
+        result_first = self._normalize(pacer_result.get("firstName", ""))
+        result_middle = self._normalize(pacer_result.get("middleName", ""))
+
+        # Last name must match exactly
+        if search_last != result_last:
+            return False
+
+        # If we have a firstName, it must match exactly
+        if search_first:
+            if search_first != result_first:
+                return False
+
+        # If we have a middle initial/name, check it matches
+        if search_middle and result_middle:
+            # Compare first character (initial) at minimum
+            if search_middle[0] != result_middle[0]:
+                return False
+
+        return True
+
+    def _parse_name(self, owner_name: str) -> dict:
+        """Parse owner_name into lastName, firstName, middleName for PACER search.
+
+        Handles formats like:
+          - 'Bynum Cynthia F' -> lastName=Bynum, firstName=Cynthia, middleName=F
+          - 'Setzer Stephen A & Daughtry Martha T' -> lastName=Setzer, firstName=Stephen, middleName=A
+          - 'ABC HOMES LLC' -> lastName=ABC HOMES LLC (entity, no firstName)
+        """
+        name = owner_name.strip()
+
+        # Handle semicolons (multiple people listed)
+        if ';' in name:
+            name = name.split(';')[0].strip()
+
+        # If contains '&', take only the first person
+        if '&' in name:
+            name = name.split('&')[0].strip()
+
+        # Split into parts
+        parts = name.split()
+
+        if len(parts) == 1:
+            # Single word — treat as entity or last name only
+            return {"lastName": parts[0]}
+        elif len(parts) >= 2:
+            # Check if it looks like an entity (LLC, INC, CORP, TRUST, etc.)
+            entity_indicators = ['LLC', 'INC', 'CORP', 'LTD', 'TRUST', 'ESTATE',
+                                 'PROPERTIES', 'INVESTMENTS', 'HOLDINGS', 'GROUP',
+                                 'PARTNERS', 'ASSOCIATION', 'BANK', 'COMPANY']
+            upper_name = name.upper()
+            if any(ind in upper_name for ind in entity_indicators):
+                return {"lastName": name}
+            else:
+                # Assume format: LastName FirstName [MiddleInitial/MiddleName]
+                result = {"lastName": parts[0], "firstName": parts[1]}
+                if len(parts) >= 3:
+                    result["middleName"] = parts[2]
+                return result
+
+        return {"lastName": name}
+
     def search(self, lead: LeadKey) -> list[SourceRecord]:
         if not lead.owner_name:
             return []
@@ -78,14 +164,19 @@ class PacerBankruptcyAdapter(SourceAdapter):
 
         token = self._get_token()
 
-        # Use the full name as lastName — works for both persons and entities
+        # Parse name into lastName/firstName for PACER
+        name_fields = self._parse_name(lead.owner_name)
         search_body: dict = {
-            "lastName": lead.owner_name.strip(),
+            "lastName": name_fields["lastName"],
             "jurisdictionType": "bk",
+            "exactNameMatch": True,
+            "caseYearFrom": "2021",
             "courtCase": {
                 "courtId": self.GA_COURTS,
             },
         }
+        if "firstName" in name_fields:
+            search_body["firstName"] = name_fields["firstName"]
 
         url = f"{self.pcl_base}/parties/find"
         headers = {
@@ -111,8 +202,34 @@ class PacerBankruptcyAdapter(SourceAdapter):
 
         data = r.json()
         records = []
+        seen_cases = set()  # Deduplicate by case number
+
         for item in data.get("content", []):
+            # Filter: only keep results that match the lead's name
+            if not self._name_matches(lead.owner_name, item):
+                continue
+
             court_case = item.get("courtCase", {})
+            case_number = (
+                court_case.get("caseNumberFull") or item.get("caseNumberFull") or ""
+            )
+
+            # Deduplicate: skip if we've already seen this case
+            if case_number and case_number in seen_cases:
+                continue
+            seen_cases.add(case_number)
+
+            # Assign confidence based on match quality
+            result_first = (item.get("firstName") or "").lower()
+            parsed = self._parse_name(lead.owner_name)
+            search_first = (parsed.get("firstName") or "").lower()
+            if search_first and result_first == search_first:
+                confidence = 0.90
+            elif search_first and result_first.startswith(search_first[:3]):
+                confidence = 0.75
+            else:
+                confidence = 0.60
+
             records.append(
                 SourceRecord(
                     source=self.name,
@@ -123,12 +240,11 @@ class PacerBankruptcyAdapter(SourceAdapter):
                     property_address=lead.property_address,
                     filing_date=court_case.get("dateFiled") or item.get("dateFiled"),
                     status=item.get("caseStatus"),
-                    case_number=court_case.get("caseNumberFull")
-                    or item.get("caseNumberFull"),
+                    case_number=case_number,
                     raw_reference=court_case.get("courtId") or item.get("courtId"),
                     raw_url=court_case.get("caseLink"),
                     raw=item,
-                    confidence=0.75,
+                    confidence=confidence,
                 )
             )
         return records
