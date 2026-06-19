@@ -6,3 +6,4 @@ tenacity>=8.4.2
 pyyaml>=6.0.2
 pytest>=8.2.0
 responses>=0.25.3
+openpyxl>=3.1.5

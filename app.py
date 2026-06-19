@@ -12,9 +12,12 @@ def main():
     p.add_argument("--gsccca-dir", default="data/gsccca_exports")
     p.add_argument("--include-pacer", action="store_true")
     p.add_argument("--out", default="data/output/results.json")
+    p.add_argument("--limit", type=int, default=None, help="Process only the first N leads")
     args = p.parse_args()
- 
+
     leads = load_leads_csv(args.leads)
+    if args.limit is not None:
+        leads = leads[:args.limit]
     sources = default_sources(args.gsccca_dir, include_pacer=args.include_pacer)
     for s in sources:
         try:
