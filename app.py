@@ -27,3 +27,7 @@ def main():
     print(f"wrote {args.out}")
 
 
+if __name__ == "__main__":
+    main()
+
+
