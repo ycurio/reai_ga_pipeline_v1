@@ -29,6 +29,18 @@ class LeadKey(BaseModel):
     property_address: Optional[str] = None
     county: Optional[str] = None
     state: str = "GA"
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    bedrooms: Optional[str] = None
+    baths: Optional[str] = None
+    sqft: Optional[str] = None
+    lot_size: Optional[str] = None
+    year_built: Optional[str] = None
+    assessed_value: Optional[str] = None
+    equity_percent: Optional[str] = None
+    unpaid_balance: Optional[str] = None
+    original_loan_amount: Optional[str] = None
+    mortgage_recording_date: Optional[str] = None
     seed_record_types: list[RecordType] = Field(default_factory=list)
 
 

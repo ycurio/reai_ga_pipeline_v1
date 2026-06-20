@@ -9,7 +9,12 @@ from reai.scoring import WEIGHTS
 
 WEIGHTS_BY_VALUE = {record_type.value: weight for record_type, weight in WEIGHTS.items()}
 
-LEAD_FIELDS = ["owner_name", "parcel_id", "property_address", "county", "state"]
+LEAD_FIELDS = [
+    "owner_name", "parcel_id", "property_address", "county", "state",
+    "phone", "email",
+    "bedrooms", "baths", "sqft", "lot_size", "year_built", "assessed_value",
+    "equity_percent", "unpaid_balance", "original_loan_amount", "mortgage_recording_date",
+]
 DETAIL_FIELDS = [
     "source", "record_type", "case_number", "status", "filing_date",
     "amount", "instrument_number", "book", "page", "confidence",

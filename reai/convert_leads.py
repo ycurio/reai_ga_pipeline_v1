@@ -9,8 +9,18 @@ from pathlib import Path
 
 import pandas as pd
 
-LEAD_FIELDS = ["owner_name", "parcel_id", "property_address", "county", "state", "seed_record_type"]
+LEAD_FIELDS = [
+    "owner_name", "parcel_id", "property_address", "county", "state",
+    "phone", "email",
+    "bedrooms", "baths", "sqft", "lot_size", "year_built", "assessed_value",
+    "equity_percent", "unpaid_balance", "original_loan_amount", "mortgage_recording_date",
+    "seed_record_type",
+]
 SEED_TYPE_DELIM = "|"
+
+# Best-effort guesses - no source file has these yet, tighten once a real export shows up.
+PHONE_COLUMN_CANDIDATES = ["Phone", "Phone Number", "Owner Phone", "Cell Phone", "Mobile Phone"]
+EMAIL_COLUMN_CANDIDATES = ["Email", "Email Address", "Owner Email"]
 
 DOC_TYPE_TO_RECORD_TYPE = [
     ("LIS PENDENS", "lis_pendens"),
@@ -28,21 +38,47 @@ def classify_doc_type(description: str | None) -> str:
     return DEFAULT_RECORD_TYPE
 
 
+def col(df: pd.DataFrame, name: str) -> pd.Series:
+    """Pull a column as a stripped string, or blank if the source file doesn't have it."""
+    if name not in df.columns:
+        return pd.Series([""] * len(df), index=df.index)
+    return df[name].fillna("").astype(str).str.strip()
+
+
+def first_matching_col(df: pd.DataFrame, candidates: list[str]) -> pd.Series:
+    for name in candidates:
+        if name in df.columns:
+            return df[name].fillna("").astype(str).str.strip()
+    return pd.Series([""] * len(df), index=df.index)
+
+
 def convert_foreclosure_export(df: pd.DataFrame) -> pd.DataFrame:
     """Handles the foreclosure/NOD/lis-pendens provider export schema (Document Type Code Description,
     Property Full Street Address, Assessor Parcel Number, etc.) - seed type is classified per row."""
     leads = pd.DataFrame()
-    leads["owner_name"] = df["Current Owner Name"].str.strip()
+    leads["owner_name"] = col(df, "Current Owner Name")
     leads["parcel_id"] = df["Assessor Parcel Number"].fillna(df["NOD Apn"]).fillna("").str.strip()
     leads["property_address"] = (
-        df["Property Full Street Address"].fillna("").str.strip() + ", " +
-        df["Property City Name"].fillna("").str.strip() + ", " +
-        df["Property State"].fillna("").str.strip() + " " +
-        df["Property Zipcode"].fillna("").astype(str).str.strip()
+        col(df, "Property Full Street Address") + ", " +
+        col(df, "Property City Name") + ", " +
+        col(df, "Property State") + " " +
+        col(df, "Property Zipcode")
     )
-    leads["county"] = df["County"].fillna("").str.strip()
+    leads["county"] = col(df, "County")
     leads["state"] = df["Property State"].fillna("GA").str.strip()
     leads["seed_record_type"] = df["Document Type Code Description"].apply(classify_doc_type)
+    leads["phone"] = first_matching_col(df, PHONE_COLUMN_CANDIDATES)
+    leads["email"] = first_matching_col(df, EMAIL_COLUMN_CANDIDATES)
+    leads["bedrooms"] = col(df, "Bedrooms")
+    leads["baths"] = col(df, "Baths")
+    leads["sqft"] = col(df, "Sq Ft")
+    leads["lot_size"] = col(df, "Lotsize")
+    leads["year_built"] = col(df, "Year Built")
+    leads["assessed_value"] = col(df, "Assessed Value")
+    leads["equity_percent"] = col(df, "Equity")
+    leads["unpaid_balance"] = col(df, "Unpaid Balance")
+    leads["original_loan_amount"] = col(df, "Original Loan Amount")
+    leads["mortgage_recording_date"] = col(df, "Loan Recording Date")
     return leads
 
 
@@ -50,17 +86,29 @@ def convert_successor(df: pd.DataFrame) -> pd.DataFrame:
     """Handles the successor/pre-probate provider export schema (Owner Name, Age, Group Tag, etc.)
     - every row seeds as successor-level distress."""
     leads = pd.DataFrame()
-    leads["owner_name"] = df["Owner Name"].str.strip()
-    leads["parcel_id"] = df["Parcel No"].fillna("").astype(str).str.strip()
+    leads["owner_name"] = col(df, "Owner Name")
+    leads["parcel_id"] = col(df, "Parcel No")
     leads["property_address"] = (
-        df["Property Address"].fillna("").str.strip() + ", " +
-        df["Property City"].fillna("").str.strip() + ", " +
-        df["Property State"].fillna("").str.strip() + " " +
-        df["Property Zip"].fillna("").astype(str).str.strip()
+        col(df, "Property Address") + ", " +
+        col(df, "Property City") + ", " +
+        col(df, "Property State") + " " +
+        col(df, "Property Zip")
     )
-    leads["county"] = df["Property County"].fillna("").str.strip()
+    leads["county"] = col(df, "Property County")
     leads["state"] = df["Property State"].fillna("GA").str.strip()
     leads["seed_record_type"] = "successor"
+    leads["phone"] = first_matching_col(df, PHONE_COLUMN_CANDIDATES)
+    leads["email"] = first_matching_col(df, EMAIL_COLUMN_CANDIDATES)
+    leads["bedrooms"] = ""
+    leads["baths"] = ""
+    leads["sqft"] = col(df, "Gross Area")
+    leads["lot_size"] = col(df, "Lot Area")
+    leads["year_built"] = col(df, "Year Built")
+    leads["assessed_value"] = col(df, "Assessed Value")
+    leads["equity_percent"] = ""
+    leads["unpaid_balance"] = ""
+    leads["original_loan_amount"] = ""
+    leads["mortgage_recording_date"] = ""
     return leads
 
 
@@ -100,7 +148,8 @@ def merge_leads(rows: list[dict], new_rows: list[dict]) -> tuple[list[dict], int
             added += 1
         else:
             existing["seed_record_type"] = merge_seed_types(existing["seed_record_type"], new["seed_record_type"])
-            for field in ("parcel_id", "county"):
+            fillable = [f for f in LEAD_FIELDS if f not in ("owner_name", "property_address", "seed_record_type")]
+            for field in fillable:
                 if not existing.get(field) and new.get(field):
                     existing[field] = new[field]
             merged += 1
