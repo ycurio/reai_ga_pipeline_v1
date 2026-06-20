@@ -25,9 +25,9 @@ def run_for_leads(leads: Iterable[LeadKey], sources=None) -> list[dict]:
     output = []
     for lead in leads:
         records: list[SourceRecord] = []
-        if lead.seed_record_type:
+        for seed_type in lead.seed_record_types:
             records.append(SourceRecord(
-                source="INTAKE_SEED", record_type=lead.seed_record_type,
+                source="INTAKE_SEED", record_type=seed_type,
                 county=lead.county, state=lead.state, owner_name=lead.owner_name,
                 parcel_id=lead.parcel_id, property_address=lead.property_address,
                 confidence=1.0,
@@ -44,9 +44,12 @@ def run_for_leads(leads: Iterable[LeadKey], sources=None) -> list[dict]:
     return output
 
 
+SEED_TYPE_DELIM = "|"
+
+
 def load_leads_csv(path: str) -> list[LeadKey]:
     rows = list(csv.DictReader(open(path, newline="")))
     for r in rows:
-        if not r.get("seed_record_type"):
-            r.pop("seed_record_type", None)
+        raw = r.pop("seed_record_type", "") or ""
+        r["seed_record_types"] = [t for t in raw.split(SEED_TYPE_DELIM) if t]
     return [LeadKey(**r) for r in rows]

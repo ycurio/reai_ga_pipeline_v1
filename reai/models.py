@@ -29,7 +29,7 @@ class LeadKey(BaseModel):
     property_address: Optional[str] = None
     county: Optional[str] = None
     state: str = "GA"
-    seed_record_type: Optional[RecordType] = None
+    seed_record_types: list[RecordType] = Field(default_factory=list)
 
 
 class SourceRecord(BaseModel):
