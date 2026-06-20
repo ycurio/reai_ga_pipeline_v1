@@ -3,7 +3,7 @@ import csv
 from pathlib import Path
 from typing import Iterable
 from pydantic import TypeAdapter
-from reai.models import LeadKey, SourceRecord
+from reai.models import LeadKey, SourceRecord, RecordType
 from reai.scoring import distress_score
 from reai.sources.fema_nfhl import FemaNFHLAdapter
 from reai.sources.pacer_bankruptcy import PacerBankruptcyAdapter
@@ -25,6 +25,13 @@ def run_for_leads(leads: Iterable[LeadKey], sources=None) -> list[dict]:
     output = []
     for lead in leads:
         records: list[SourceRecord] = []
+        if lead.seed_record_type:
+            records.append(SourceRecord(
+                source="INTAKE_SEED", record_type=lead.seed_record_type,
+                county=lead.county, state=lead.state, owner_name=lead.owner_name,
+                parcel_id=lead.parcel_id, property_address=lead.property_address,
+                confidence=1.0,
+            ))
         for source in sources:
             try:
                 records.extend(source.search(lead))
@@ -39,4 +46,7 @@ def run_for_leads(leads: Iterable[LeadKey], sources=None) -> list[dict]:
 
 def load_leads_csv(path: str) -> list[LeadKey]:
     rows = list(csv.DictReader(open(path, newline="")))
+    for r in rows:
+        if not r.get("seed_record_type"):
+            r.pop("seed_record_type", None)
     return [LeadKey(**r) for r in rows]

@@ -13,9 +13,11 @@ class RecordType(str, Enum):
     mechanics_lien = "mechanics_lien"
     judgment = "judgment"
     lis_pendens = "lis_pendens"
+    notice_of_default = "notice_of_default"
     deed_under_power = "deed_under_power"
     foreclosure = "foreclosure"
     probate = "probate"
+    successor = "successor"
     flood = "flood"
     business_entity = "business_entity"
     unknown = "unknown"
@@ -27,6 +29,7 @@ class LeadKey(BaseModel):
     property_address: Optional[str] = None
     county: Optional[str] = None
     state: str = "GA"
+    seed_record_type: Optional[RecordType] = None
 
 
 class SourceRecord(BaseModel):

@@ -9,9 +9,11 @@ WEIGHTS = {
     RecordType.mechanics_lien: 12,
     RecordType.judgment: 12,
     RecordType.lis_pendens: 25,
+    RecordType.notice_of_default: 15,
     RecordType.deed_under_power: 30,
     RecordType.foreclosure: 30,
     RecordType.probate: 20,
+    RecordType.successor: 20,
     RecordType.flood: -8,
 }
 
