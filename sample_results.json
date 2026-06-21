@@ -1,0 +1,65 @@
+[
+  {
+    "lead": {
+      "owner_name": "Bynum Cynthia F",
+      "parcel_id": "12 -2945-0782-018-5",
+      "property_address": "150 Riversong Dr, Alpharetta, GA 30022",
+      "county": "Fulton",
+      "state": "GA",
+      "phone": "678-555-0142",
+      "email": "cbynum@example.com",
+      "assessed_value": "$133,840.00",
+      "equity_percent": "67.03%"
+    },
+    "score": 73,
+    "records": [
+      {"source": "INTAKE_SEED", "record_type": "foreclosure", "confidence": 1.0},
+      {"source": "PACER_BANKRUPTCY", "record_type": "bankruptcy", "case_number": "1:2026bk10455",
+       "filing_date": "2026-05-10", "confidence": 0.9},
+      {"source": "GSCCCA_EXPORT", "record_type": "lis_pendens", "confidence": 0.7}
+    ]
+  },
+  {
+    "lead": {
+      "owner_name": "Harris Kevin & Harris Daphne",
+      "parcel_id": "5-089 -235",
+      "property_address": "1939 Pinehurst View Ct, Grayson, GA 30017",
+      "county": "Gwinnett",
+      "state": "GA",
+      "phone": "",
+      "email": ""
+    },
+    "score": 30,
+    "records": [
+      {"source": "INTAKE_SEED", "record_type": "foreclosure", "confidence": 1.0}
+    ]
+  },
+  {
+    "lead": {
+      "owner_name": "Clt Living Trust,  & Lauren Clark & Re Tr,",
+      "parcel_id": "095  389",
+      "property_address": "4030 Manor Overlook Dr, Cumming, GA 30028",
+      "county": "Forsyth",
+      "state": "GA",
+      "phone": "",
+      "email": ""
+    },
+    "score": 20,
+    "records": [
+      {"source": "INTAKE_SEED", "record_type": "successor", "confidence": 1.0}
+    ]
+  },
+  {
+    "lead": {
+      "owner_name": "Demartino Ann",
+      "parcel_id": "00-42-47-08-08-008-3340",
+      "property_address": "334 Dorset H, Boca Raton, FL 33434",
+      "county": "Palm Beach",
+      "state": "FL",
+      "phone": "",
+      "email": ""
+    },
+    "score": 0,
+    "records": []
+  }
+]

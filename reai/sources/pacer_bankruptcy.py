@@ -3,6 +3,7 @@ import os
 import re
 from reai.http import session_with_retries
 from reai.models import LeadKey, RecordType, SourceHealth, SourceRecord
+from reai.name_utils import parse_owner_name
 from reai.sources.base import SourceAdapter
 
 
@@ -116,45 +117,8 @@ class PacerBankruptcyAdapter(SourceAdapter):
         return True
 
     def _parse_name(self, owner_name: str) -> dict:
-        """Parse owner_name into lastName, firstName, middleName for PACER search.
-
-        Handles formats like:
-          - 'Bynum Cynthia F' -> lastName=Bynum, firstName=Cynthia, middleName=F
-          - 'Setzer Stephen A & Daughtry Martha T' -> lastName=Setzer, firstName=Stephen, middleName=A
-          - 'ABC HOMES LLC' -> lastName=ABC HOMES LLC (entity, no firstName)
-        """
-        name = owner_name.strip()
-
-        # Handle semicolons (multiple people listed)
-        if ';' in name:
-            name = name.split(';')[0].strip()
-
-        # If contains '&', take only the first person
-        if '&' in name:
-            name = name.split('&')[0].strip()
-
-        # Split into parts
-        parts = name.split()
-
-        if len(parts) == 1:
-            # Single word — treat as entity or last name only
-            return {"lastName": parts[0]}
-        elif len(parts) >= 2:
-            # Check if it looks like an entity (LLC, INC, CORP, TRUST, etc.)
-            entity_indicators = ['LLC', 'INC', 'CORP', 'LTD', 'TRUST', 'ESTATE',
-                                 'PROPERTIES', 'INVESTMENTS', 'HOLDINGS', 'GROUP',
-                                 'PARTNERS', 'ASSOCIATION', 'BANK', 'COMPANY']
-            upper_name = name.upper()
-            if any(ind in upper_name for ind in entity_indicators):
-                return {"lastName": name}
-            else:
-                # Assume format: LastName FirstName [MiddleInitial/MiddleName]
-                result = {"lastName": parts[0], "firstName": parts[1]}
-                if len(parts) >= 3:
-                    result["middleName"] = parts[2]
-                return result
-
-        return {"lastName": name}
+        """Parse owner_name into lastName, firstName, middleName for PACER search."""
+        return parse_owner_name(owner_name)
 
     def search(self, lead: LeadKey) -> list[SourceRecord]:
         if not lead.owner_name:
