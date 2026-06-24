@@ -31,6 +31,8 @@ class LeadKey(BaseModel):
     state: str = "GA"
     phone: Optional[str] = None
     email: Optional[str] = None
+    all_phones: Optional[str] = None
+    all_emails: Optional[str] = None
     bedrooms: Optional[str] = None
     baths: Optional[str] = None
     sqft: Optional[str] = None

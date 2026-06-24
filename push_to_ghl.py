@@ -1,11 +1,10 @@
 """Push scored leads into GoHighLevel as Contacts, tagged by distress signal.
 
-NOTE: the upsert endpoint (POST https://services.leadconnectorhq.com/contacts/upsert)
-is confirmed correct. The rest of the request shape - auth header format, exact body
-field names, customFields format - is built from general knowledge of GHL's v2 API and
-NOT independently verified against live docs this session (their docs site is a
-JS-rendered SPA that couldn't be fetched for inspection). Before using --live,
-cross-check the body/headers against your own account's API docs/Postman collection.
+NOTE: live-tested successfully on 2026-06-21 - the upsert endpoint, Bearer token auth,
+and core body fields (name, phone, email, address, tags) are confirmed working against
+a real account. customFields remains UNVERIFIED (no field IDs configured yet, so none
+were sent in that test) - confirm the {"id": ..., "value": ...} shape once you fill in
+CUSTOM_FIELD_IDS below.
 
 Custom fields must exist in your GHL location first (Settings -> Custom Fields) -
 GHL's API keys customFields by field ID, not name, so fill in CUSTOM_FIELD_IDS below
@@ -96,6 +95,8 @@ def push_contact(session, payload: dict, api_key: str) -> dict:
         "Content-Type": "application/json",
     }
     r = session.post(f"{GHL_BASE_URL}/contacts/upsert", json=payload, headers=headers, timeout=30)
+    if not r.ok:
+        print(f"GHL error {r.status_code}: {r.text}")
     r.raise_for_status()
     return r.json()
 

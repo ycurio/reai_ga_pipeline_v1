@@ -11,16 +11,24 @@ import pandas as pd
 
 LEAD_FIELDS = [
     "owner_name", "parcel_id", "property_address", "county", "state",
-    "phone", "email",
+    "phone", "email", "all_phones", "all_emails",
     "bedrooms", "baths", "sqft", "lot_size", "year_built", "assessed_value",
     "equity_percent", "unpaid_balance", "original_loan_amount", "mortgage_recording_date",
     "seed_record_type",
 ]
 SEED_TYPE_DELIM = "|"
 
-# Best-effort guesses - no source file has these yet, tighten once a real export shows up.
 PHONE_COLUMN_CANDIDATES = ["Phone", "Phone Number", "Owner Phone", "Cell Phone", "Mobile Phone"]
 EMAIL_COLUMN_CANDIDATES = ["Email", "Email Address", "Owner Email"]
+
+# Skip-traced exports return up to 5 ranked phones and 3 ranked emails per lead.
+MULTI_PHONE_COLUMNS = ["Phone", "Phone2", "Phone3", "Phone4", "Phone5"]
+MULTI_EMAIL_COLUMNS = ["Email", "Email 2", "Email 3"]
+
+# Skip-traced exports echo the original owner name back as "Full Name" - if that collides
+# with the skip-trace's own "Full Name" column (the matched contact, which can be a totally
+# different name/entity than the title owner), pandas renames the echoed one to "Full Name.1".
+OWNER_NAME_COLUMN_CANDIDATES = ["Current Owner Name", "Full Name.1", "Full Name"]
 
 DOC_TYPE_TO_RECORD_TYPE = [
     ("LIS PENDENS", "lis_pendens"),
@@ -38,26 +46,71 @@ def classify_doc_type(description: str | None) -> str:
     return DEFAULT_RECORD_TYPE
 
 
+def _stringify(value) -> str:
+    """Excel often stores numeric-looking columns (phone, parcel #) as floats - format
+    whole-number floats without the trailing '.0' instead of naively str()-ing them."""
+    if pd.isna(value):
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
+
+
 def col(df: pd.DataFrame, name: str) -> pd.Series:
     """Pull a column as a stripped string, or blank if the source file doesn't have it."""
     if name not in df.columns:
         return pd.Series([""] * len(df), index=df.index)
-    return df[name].fillna("").astype(str).str.strip()
+    return df[name].apply(_stringify)
 
 
 def first_matching_col(df: pd.DataFrame, candidates: list[str]) -> pd.Series:
     for name in candidates:
         if name in df.columns:
-            return df[name].fillna("").astype(str).str.strip()
+            return df[name].apply(_stringify)
     return pd.Series([""] * len(df), index=df.index)
+
+
+def format_phone(value: str) -> str:
+    """Normalize a bare-digits US phone number to E.164 (+1XXXXXXXXXX)."""
+    digits = "".join(c for c in value if c.isdigit())
+    if len(digits) == 10:
+        return f"+1{digits}"
+    if len(digits) == 11 and digits.startswith("1"):
+        return f"+{digits}"
+    return value
+
+
+def first_nonblank(*series: pd.Series) -> pd.Series:
+    result = series[0]
+    for s in series[1:]:
+        result = result.where(result != "", s)
+    return result
+
+
+def collect_multi(df: pd.DataFrame, columns: list[str], formatter=None) -> pd.Series:
+    """Collect non-blank values across multiple ranked columns (e.g. Phone, Phone2, ...)
+    per row into one deduped, delimited list, dropping columns the file doesn't have."""
+    existing = [c for c in columns if c in df.columns]
+    if not existing:
+        return pd.Series([""] * len(df), index=df.index)
+
+    def combine(row):
+        values = [v for v in row if v]
+        if formatter:
+            values = [formatter(v) for v in values]
+        deduped = list(dict.fromkeys(values))
+        return SEED_TYPE_DELIM.join(deduped)
+
+    cols = pd.concat([df[c].apply(_stringify) for c in existing], axis=1)
+    return cols.apply(combine, axis=1)
 
 
 def convert_foreclosure_export(df: pd.DataFrame) -> pd.DataFrame:
     """Handles the foreclosure/NOD/lis-pendens provider export schema (Document Type Code Description,
     Property Full Street Address, Assessor Parcel Number, etc.) - seed type is classified per row."""
     leads = pd.DataFrame()
-    leads["owner_name"] = col(df, "Current Owner Name")
-    leads["parcel_id"] = df["Assessor Parcel Number"].fillna(df["NOD Apn"]).fillna("").str.strip()
+    leads["owner_name"] = first_matching_col(df, OWNER_NAME_COLUMN_CANDIDATES)
+    leads["parcel_id"] = first_nonblank(col(df, "Assessor Parcel Number"), col(df, "NOD Apn"))
     leads["property_address"] = (
         col(df, "Property Full Street Address") + ", " +
         col(df, "Property City Name") + ", " +
@@ -65,10 +118,12 @@ def convert_foreclosure_export(df: pd.DataFrame) -> pd.DataFrame:
         col(df, "Property Zipcode")
     )
     leads["county"] = col(df, "County")
-    leads["state"] = df["Property State"].fillna("GA").str.strip()
-    leads["seed_record_type"] = df["Document Type Code Description"].apply(classify_doc_type)
-    leads["phone"] = first_matching_col(df, PHONE_COLUMN_CANDIDATES)
+    leads["state"] = first_nonblank(col(df, "Property State"), pd.Series(["GA"] * len(df), index=df.index))
+    leads["seed_record_type"] = col(df, "Document Type Code Description").apply(classify_doc_type)
+    leads["phone"] = first_matching_col(df, PHONE_COLUMN_CANDIDATES).apply(format_phone)
     leads["email"] = first_matching_col(df, EMAIL_COLUMN_CANDIDATES)
+    leads["all_phones"] = collect_multi(df, MULTI_PHONE_COLUMNS, formatter=format_phone)
+    leads["all_emails"] = collect_multi(df, MULTI_EMAIL_COLUMNS)
     leads["bedrooms"] = col(df, "Bedrooms")
     leads["baths"] = col(df, "Baths")
     leads["sqft"] = col(df, "Sq Ft")
@@ -95,10 +150,12 @@ def convert_successor(df: pd.DataFrame) -> pd.DataFrame:
         col(df, "Property Zip")
     )
     leads["county"] = col(df, "Property County")
-    leads["state"] = df["Property State"].fillna("GA").str.strip()
+    leads["state"] = first_nonblank(col(df, "Property State"), pd.Series(["GA"] * len(df), index=df.index))
     leads["seed_record_type"] = "successor"
-    leads["phone"] = first_matching_col(df, PHONE_COLUMN_CANDIDATES)
+    leads["phone"] = first_matching_col(df, PHONE_COLUMN_CANDIDATES).apply(format_phone)
     leads["email"] = first_matching_col(df, EMAIL_COLUMN_CANDIDATES)
+    leads["all_phones"] = collect_multi(df, MULTI_PHONE_COLUMNS, formatter=format_phone)
+    leads["all_emails"] = collect_multi(df, MULTI_EMAIL_COLUMNS)
     leads["bedrooms"] = ""
     leads["baths"] = ""
     leads["sqft"] = col(df, "Gross Area")

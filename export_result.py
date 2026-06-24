@@ -11,7 +11,7 @@ WEIGHTS_BY_VALUE = {record_type.value: weight for record_type, weight in WEIGHTS
 
 LEAD_FIELDS = [
     "owner_name", "parcel_id", "property_address", "county", "state",
-    "phone", "email",
+    "phone", "email", "all_phones", "all_emails",
     "bedrooms", "baths", "sqft", "lot_size", "year_built", "assessed_value",
     "equity_percent", "unpaid_balance", "original_loan_amount", "mortgage_recording_date",
 ]
