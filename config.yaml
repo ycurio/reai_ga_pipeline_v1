@@ -1,8 +1,6 @@
 state: GA
 output_dir: data/output
 sources:
-  fema_nfhl:
-    enabled: true
   pacer_bankruptcy:
     enabled: false
   gsccca_csv:

@@ -1,0 +1,13 @@
+sample_postgres:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('DBT_HOST', 'localhost') }}"
+      user: "{{ env_var('DBT_USER', 'your_user') }}"
+      password: "{{ env_var('DBT_PASSWORD', 'your_password') }}"
+      port: 5432
+      dbname: "{{ env_var('DBT_DBNAME', 'your_database') }}"
+      schema: "{{ env_var('DBT_SCHEMA', 'public') }}"
+      threads: 1
+      keepalives: 0

@@ -30,6 +30,10 @@ def parse_owner_name(owner_name: str) -> dict:
         upper_name = name.upper()
         if any(ind in upper_name for ind in ENTITY_INDICATORS):
             return {"lastName": name}
+        if len(parts[0]) == 1 and parts[0].isalpha():
+            # A single-letter leading token (e.g. 'E Blevins') is a first initial,
+            # not a last name in "LastName FirstName" order - surnames are never one letter.
+            return {"lastName": parts[-1], "firstName": " ".join(parts[:-1])}
         result = {"lastName": parts[0], "firstName": parts[1]}
         if len(parts) >= 3:
             result["middleName"] = parts[2]

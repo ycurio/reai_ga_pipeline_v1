@@ -18,7 +18,6 @@ class RecordType(str, Enum):
     foreclosure = "foreclosure"
     probate = "probate"
     successor = "successor"
-    flood = "flood"
     business_entity = "business_entity"
     unknown = "unknown"
 
@@ -27,6 +26,7 @@ class LeadKey(BaseModel):
     owner_name: Optional[str] = None
     parcel_id: Optional[str] = None
     property_address: Optional[str] = None
+    mailing_address: Optional[str] = None
     county: Optional[str] = None
     state: str = "GA"
     phone: Optional[str] = None
@@ -43,6 +43,13 @@ class LeadKey(BaseModel):
     unpaid_balance: Optional[str] = None
     original_loan_amount: Optional[str] = None
     mortgage_recording_date: Optional[str] = None
+    auction_date: Optional[str] = None
+    auction_time: Optional[str] = None
+    auction_city: Optional[str] = None
+    past_due_amount: Optional[str] = None
+    trustee_name: Optional[str] = None
+    trustee_phone: Optional[str] = None
+    contact_phone: Optional[str] = None
     seed_record_types: list[RecordType] = Field(default_factory=list)
 
 

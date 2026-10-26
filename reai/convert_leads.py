@@ -10,10 +10,12 @@ from pathlib import Path
 import pandas as pd
 
 LEAD_FIELDS = [
-    "owner_name", "parcel_id", "property_address", "county", "state",
+    "owner_name", "parcel_id", "property_address", "mailing_address", "county", "state",
     "phone", "email", "all_phones", "all_emails",
     "bedrooms", "baths", "sqft", "lot_size", "year_built", "assessed_value",
     "equity_percent", "unpaid_balance", "original_loan_amount", "mortgage_recording_date",
+    "auction_date", "auction_time", "auction_city", "past_due_amount",
+    "trustee_name", "trustee_phone", "contact_phone",
     "seed_record_type",
 ]
 SEED_TYPE_DELIM = "|"
@@ -29,6 +31,10 @@ MULTI_EMAIL_COLUMNS = ["Email", "Email 2", "Email 3"]
 # with the skip-trace's own "Full Name" column (the matched contact, which can be a totally
 # different name/entity than the title owner), pandas renames the echoed one to "Full Name.1".
 OWNER_NAME_COLUMN_CANDIDATES = ["Current Owner Name", "Full Name.1", "Full Name"]
+
+# Same ".1" collision as Full Name above: files that also carry a plain "Mailing
+# Address/City/State/Zip" block get their second "Mailing State" column renamed by pandas.
+MAILING_STATE_COLUMN_CANDIDATES = ["Mailing State.1", "Mailing State"]
 
 DOC_TYPE_TO_RECORD_TYPE = [
     ("LIS PENDENS", "lis_pendens"),
@@ -117,6 +123,12 @@ def convert_foreclosure_export(df: pd.DataFrame) -> pd.DataFrame:
         col(df, "Property State") + " " +
         col(df, "Property Zipcode")
     )
+    leads["mailing_address"] = (
+        col(df, "Mailing Full Street Address") + ", " +
+        col(df, "Mailing City Name") + ", " +
+        first_matching_col(df, MAILING_STATE_COLUMN_CANDIDATES) + " " +
+        col(df, "Mailing Zipcode")
+    )
     leads["county"] = col(df, "County")
     leads["state"] = first_nonblank(col(df, "Property State"), pd.Series(["GA"] * len(df), index=df.index))
     leads["seed_record_type"] = col(df, "Document Type Code Description").apply(classify_doc_type)
@@ -134,6 +146,13 @@ def convert_foreclosure_export(df: pd.DataFrame) -> pd.DataFrame:
     leads["unpaid_balance"] = col(df, "Unpaid Balance")
     leads["original_loan_amount"] = col(df, "Original Loan Amount")
     leads["mortgage_recording_date"] = col(df, "Loan Recording Date")
+    leads["auction_date"] = col(df, "Auction Date")
+    leads["auction_time"] = col(df, "Auction Time")
+    leads["auction_city"] = col(df, "Auction City")
+    leads["past_due_amount"] = col(df, "Past Due Amount")
+    leads["trustee_name"] = col(df, "Trustee Last Name Corporation Name")
+    leads["trustee_phone"] = col(df, "Trustee Telephone Number").apply(format_phone)
+    leads["contact_phone"] = col(df, "Contact Telephone Number").apply(format_phone)
     return leads
 
 
@@ -148,6 +167,12 @@ def convert_successor(df: pd.DataFrame) -> pd.DataFrame:
         col(df, "Property City") + ", " +
         col(df, "Property State") + " " +
         col(df, "Property Zip")
+    )
+    leads["mailing_address"] = (
+        col(df, "Mailing Address") + ", " +
+        col(df, "Mailing City") + ", " +
+        col(df, "Mailing State") + " " +
+        col(df, "Mailing Zip")
     )
     leads["county"] = col(df, "Property County")
     leads["state"] = first_nonblank(col(df, "Property State"), pd.Series(["GA"] * len(df), index=df.index))
@@ -166,6 +191,13 @@ def convert_successor(df: pd.DataFrame) -> pd.DataFrame:
     leads["unpaid_balance"] = ""
     leads["original_loan_amount"] = ""
     leads["mortgage_recording_date"] = ""
+    leads["auction_date"] = ""
+    leads["auction_time"] = ""
+    leads["auction_city"] = ""
+    leads["past_due_amount"] = ""
+    leads["trustee_name"] = ""
+    leads["trustee_phone"] = ""
+    leads["contact_phone"] = ""
     return leads
 
 

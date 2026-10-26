@@ -31,6 +31,14 @@ CUSTOM_FIELD_IDS = {
     "county": "",
     "assessed_value": "",
     "equity_percent": "",
+    "mailing_address": "",
+    "auction_date": "",
+    "auction_time": "",
+    "auction_city": "",
+    "past_due_amount": "",
+    "trustee_name": "",
+    "trustee_phone": "",
+    "contact_phone": "",
 }
 
 
@@ -68,6 +76,14 @@ def build_contact_payload(item: dict, location_id: str) -> dict:
         "county": lead.get("county") or "",
         "assessed_value": lead.get("assessed_value") or "",
         "equity_percent": lead.get("equity_percent") or "",
+        "mailing_address": lead.get("mailing_address") or "",
+        "auction_date": lead.get("auction_date") or "",
+        "auction_time": lead.get("auction_time") or "",
+        "auction_city": lead.get("auction_city") or "",
+        "past_due_amount": lead.get("past_due_amount") or "",
+        "trustee_name": lead.get("trustee_name") or "",
+        "trustee_phone": lead.get("trustee_phone") or "",
+        "contact_phone": lead.get("contact_phone") or "",
     }
     custom_fields = [
         {"id": field_id, "value": values[key]}

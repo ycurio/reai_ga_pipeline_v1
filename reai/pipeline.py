@@ -5,15 +5,12 @@ from typing import Iterable
 from pydantic import TypeAdapter
 from reai.models import LeadKey, SourceRecord, RecordType
 from reai.scoring import distress_score
-from reai.sources.fema_nfhl import FemaNFHLAdapter
 from reai.sources.pacer_bankruptcy import PacerBankruptcyAdapter
 from reai.sources.gsccca_csv import GSCCCAExportAdapter
 
 
-def default_sources(gsccca_dir: str = "data/gsccca_exports", include_pacer: bool = False, include_fema: bool = False):
+def default_sources(gsccca_dir: str = "data/gsccca_exports", include_pacer: bool = False):
     sources = []
-    if include_fema:
-        sources.append(FemaNFHLAdapter())
     sources.append(GSCCCAExportAdapter(gsccca_dir))
     if include_pacer:
         sources.append(PacerBankruptcyAdapter())
@@ -30,6 +27,7 @@ def run_for_leads(leads: Iterable[LeadKey], sources=None) -> list[dict]:
                 source="INTAKE_SEED", record_type=seed_type,
                 county=lead.county, state=lead.state, owner_name=lead.owner_name,
                 parcel_id=lead.parcel_id, property_address=lead.property_address,
+                mailing_address=lead.mailing_address,
                 confidence=1.0,
             ))
         for source in sources:

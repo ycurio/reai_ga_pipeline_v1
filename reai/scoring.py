@@ -14,7 +14,6 @@ WEIGHTS = {
     RecordType.foreclosure: 30,
     RecordType.probate: 20,
     RecordType.successor: 20,
-    RecordType.flood: -8,
 }
 
 # (max days since filing, bonus) - first matching tier wins
