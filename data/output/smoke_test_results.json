@@ -1,0 +1,257 @@
+[
+  {
+    "lead": {
+      "owner_name": "Wiesehuegel Constance & Wiesehuegel Christopher",
+      "parcel_id": "",
+      "property_address": "3545 Rock Falls Dr, Snellville, GA 30039",
+      "county": "",
+      "state": "GA",
+      "phone": "16309014866",
+      "email": "c.wiese@juno.com",
+      "all_phones": "+16309014866|+16304167357|+16308448095|+16302641267|+16308512519",
+      "all_emails": "c.wiese@juno.com|c.wiese@sbcglobal.net|wiesehuegel@cs.com",
+      "bedrooms": "",
+      "baths": "",
+      "sqft": "",
+      "lot_size": "",
+      "year_built": "",
+      "assessed_value": "",
+      "equity_percent": "",
+      "unpaid_balance": "",
+      "original_loan_amount": "",
+      "mortgage_recording_date": "",
+      "seed_record_types": [
+        "foreclosure"
+      ]
+    },
+    "score": 30,
+    "records": [
+      {
+        "source": "INTAKE_SEED",
+        "record_type": "foreclosure",
+        "county": "",
+        "state": "GA",
+        "owner_name": "Wiesehuegel Constance & Wiesehuegel Christopher",
+        "parcel_id": "",
+        "property_address": "3545 Rock Falls Dr, Snellville, GA 30039",
+        "mailing_address": null,
+        "filing_date": null,
+        "amount": null,
+        "status": null,
+        "case_number": null,
+        "instrument_number": null,
+        "book": null,
+        "page": null,
+        "raw_reference": null,
+        "raw_url": null,
+        "confidence": 1.0,
+        "extracted_at": "2026-07-05T04:11:52.456158",
+        "raw": {}
+      }
+    ]
+  },
+  {
+    "lead": {
+      "owner_name": "Oglesby Alexander Michael & Oglesby Tanairy Preval",
+      "parcel_id": "",
+      "property_address": "4212 Trillium Wood Trl, Snellville, GA 30039",
+      "county": "",
+      "state": "GA",
+      "phone": "17066804975",
+      "email": "oglesby_alex@yahoo.com",
+      "all_phones": "+17066804975|+17062450369",
+      "all_emails": "oglesby_alex@yahoo.com",
+      "bedrooms": "",
+      "baths": "",
+      "sqft": "",
+      "lot_size": "",
+      "year_built": "",
+      "assessed_value": "",
+      "equity_percent": "",
+      "unpaid_balance": "",
+      "original_loan_amount": "",
+      "mortgage_recording_date": "",
+      "seed_record_types": [
+        "foreclosure"
+      ]
+    },
+    "score": 30,
+    "records": [
+      {
+        "source": "INTAKE_SEED",
+        "record_type": "foreclosure",
+        "county": "",
+        "state": "GA",
+        "owner_name": "Oglesby Alexander Michael & Oglesby Tanairy Preval",
+        "parcel_id": "",
+        "property_address": "4212 Trillium Wood Trl, Snellville, GA 30039",
+        "mailing_address": null,
+        "filing_date": null,
+        "amount": null,
+        "status": null,
+        "case_number": null,
+        "instrument_number": null,
+        "book": null,
+        "page": null,
+        "raw_reference": null,
+        "raw_url": null,
+        "confidence": 1.0,
+        "extracted_at": "2026-07-05T04:11:52.457170",
+        "raw": {}
+      }
+    ]
+  },
+  {
+    "lead": {
+      "owner_name": "Jackson Renata",
+      "parcel_id": "",
+      "property_address": "1700 Flinthaven Ct, Lawrenceville, GA 30043",
+      "county": "",
+      "state": "GA",
+      "phone": "17708285089",
+      "email": "rw_26@yahoo.com",
+      "all_phones": "+17708285089|+17707130010|+17707159116|+17703283215|+12106987615",
+      "all_emails": "rw_26@yahoo.com|renataawhite@gmail.com",
+      "bedrooms": "",
+      "baths": "",
+      "sqft": "",
+      "lot_size": "",
+      "year_built": "",
+      "assessed_value": "",
+      "equity_percent": "",
+      "unpaid_balance": "",
+      "original_loan_amount": "",
+      "mortgage_recording_date": "",
+      "seed_record_types": [
+        "foreclosure"
+      ]
+    },
+    "score": 30,
+    "records": [
+      {
+        "source": "INTAKE_SEED",
+        "record_type": "foreclosure",
+        "county": "",
+        "state": "GA",
+        "owner_name": "Jackson Renata",
+        "parcel_id": "",
+        "property_address": "1700 Flinthaven Ct, Lawrenceville, GA 30043",
+        "mailing_address": null,
+        "filing_date": null,
+        "amount": null,
+        "status": null,
+        "case_number": null,
+        "instrument_number": null,
+        "book": null,
+        "page": null,
+        "raw_reference": null,
+        "raw_url": null,
+        "confidence": 1.0,
+        "extracted_at": "2026-07-05T04:11:52.457301",
+        "raw": {}
+      }
+    ]
+  },
+  {
+    "lead": {
+      "owner_name": "Turley Christopher L & Turley Ashley",
+      "parcel_id": "",
+      "property_address": "3949 Soft Wind Ter, Buford, GA 30518",
+      "county": "",
+      "state": "GA",
+      "phone": "16783579836",
+      "email": "",
+      "all_phones": "16783579836",
+      "all_emails": "",
+      "bedrooms": "",
+      "baths": "",
+      "sqft": "",
+      "lot_size": "",
+      "year_built": "",
+      "assessed_value": "",
+      "equity_percent": "",
+      "unpaid_balance": "",
+      "original_loan_amount": "",
+      "mortgage_recording_date": "",
+      "seed_record_types": [
+        "foreclosure"
+      ]
+    },
+    "score": 30,
+    "records": [
+      {
+        "source": "INTAKE_SEED",
+        "record_type": "foreclosure",
+        "county": "",
+        "state": "GA",
+        "owner_name": "Turley Christopher L & Turley Ashley",
+        "parcel_id": "",
+        "property_address": "3949 Soft Wind Ter, Buford, GA 30518",
+        "mailing_address": null,
+        "filing_date": null,
+        "amount": null,
+        "status": null,
+        "case_number": null,
+        "instrument_number": null,
+        "book": null,
+        "page": null,
+        "raw_reference": null,
+        "raw_url": null,
+        "confidence": 1.0,
+        "extracted_at": "2026-07-05T04:11:52.457409",
+        "raw": {}
+      }
+    ]
+  },
+  {
+    "lead": {
+      "owner_name": "Nevarez Monique",
+      "parcel_id": "",
+      "property_address": "3568 Rosebud Park Ct, Snellville, GA 30039",
+      "county": "",
+      "state": "GA",
+      "phone": "19897984124",
+      "email": "moniquenevarez@gmail.com",
+      "all_phones": "+19897984124|+16464271449|+18598934806|+17709299393|+14042946904",
+      "all_emails": "moniquenevarez@gmail.com|monique_nevarez@hotmail.com|moniquenevarez86@gmail.com",
+      "bedrooms": "",
+      "baths": "",
+      "sqft": "",
+      "lot_size": "",
+      "year_built": "",
+      "assessed_value": "",
+      "equity_percent": "",
+      "unpaid_balance": "",
+      "original_loan_amount": "",
+      "mortgage_recording_date": "",
+      "seed_record_types": [
+        "foreclosure"
+      ]
+    },
+    "score": 30,
+    "records": [
+      {
+        "source": "INTAKE_SEED",
+        "record_type": "foreclosure",
+        "county": "",
+        "state": "GA",
+        "owner_name": "Nevarez Monique",
+        "parcel_id": "",
+        "property_address": "3568 Rosebud Park Ct, Snellville, GA 30039",
+        "mailing_address": null,
+        "filing_date": null,
+        "amount": null,
+        "status": null,
+        "case_number": null,
+        "instrument_number": null,
+        "book": null,
+        "page": null,
+        "raw_reference": null,
+        "raw_url": null,
+        "confidence": 1.0,
+        "extracted_at": "2026-07-05T04:11:52.457512",
+        "raw": {}
+      }
+    ]
+  }
+]
